@@ -309,7 +309,16 @@ func adaptiveEncoderSettings(profile adaptiveProfile, cfg *config.Config, w, h i
 		bitrateK = 1000
 	}
 	quantizer = max(0, min(51, cfg.StreamQuantizer+profile.quantizerDelta))
-	return maxW, maxH, bitrateK, quantizer, profile.frameRate
+	maxFPS := cfg.StreamMaxFPS
+	if maxFPS == 0 {
+		maxFPS = 60
+	}
+	maxFPS = max(15, min(60, maxFPS))
+	// Scale the whole governor ladder with the configured ceiling. A simple
+	// min would collapse 60/50/40/30 into 30/30/30/30 for a legacy-device cap,
+	// causing expensive encoder restarts without reducing decoder cadence.
+	frameRate = max(15, profile.frameRate*maxFPS/60)
+	return maxW, maxH, bitrateK, quantizer, frameRate
 }
 
 func governorClientID(c *transport.Client) string {
@@ -320,18 +329,39 @@ func governorClientID(c *transport.Client) string {
 }
 
 func (b *Controller) handleMediaStats(c *transport.Client, stats *protocol.MediaStatsCommand) {
-	if !b.cfg.AdaptiveVideo {
-		return
+	clientID := governorClientID(c)
+	profileIndex := b.profileIndex()
+	profile := adaptiveProfiles[profileIndex]
+	pressure, active, severe, reason := governorPressure(*stats, profile)
+	decisionLabel := "disabled"
+	var decision governorDecision
+	if b.cfg.AdaptiveVideo {
+		now := time.Now()
+		b.mu.Lock()
+		decision = b.governor.observe(clientID, now, *stats)
+		profile = adaptiveProfiles[b.governor.profile]
+		b.mu.Unlock()
+		decisionLabel = "hold"
+		if decision.changed {
+			decisionLabel = adaptiveProfiles[decision.from].name + "->" + adaptiveProfiles[decision.to].name
+		}
 	}
-	now := time.Now()
-	b.mu.Lock()
-	decision := b.governor.observe(governorClientID(c), now, *stats)
-	profile := adaptiveProfiles[b.governor.profile]
-	b.mu.Unlock()
+	log.Printf("video: client stats device=%s profile=%s image=%.1f au=%.1f decode=%.1f presented=%.1f renderer=%s renderer-fps=%.1f drops=%.1f queue=%d gap=%.1fms pressure=%.2f active=%t severe=%t reason=%s decision=%s",
+		shortGovernorClientID(clientID), profile.name, stats.ImageFPS, stats.AURate,
+		stats.DecodeFPS, stats.PresentedFPS, stats.Renderer, stats.RendererFPS,
+		stats.DropPercent, stats.QueueDepth, stats.GapMS, pressure, active, severe,
+		reason, decisionLabel)
 	if !decision.changed {
 		return
 	}
 	go b.applyAdaptiveProfile(decision, profile)
+}
+
+func shortGovernorClientID(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
 }
 
 func (b *Controller) applyAdaptiveProfile(decision governorDecision, profile adaptiveProfile) {

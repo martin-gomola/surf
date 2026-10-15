@@ -24,6 +24,10 @@ const (
 	// seconds. It is frequent enough for issue diagnostics without turning
 	// packet-rate activity into packet-rate logs.
 	pcmSignalLogChunks = 250
+	// Stop sending an all-zero PCM stream after one second. The capture stays
+	// open so a real signal can resume immediately without polling or a page
+	// reload.
+	audioSuspendSilentChunks = 1000 / chunkMS
 )
 
 type pcmSignalWindow struct {
@@ -95,6 +99,9 @@ type AudioConfig struct {
 	// Capture opens a PCM source that produces signed little-endian 16 kHz
 	// mono samples. Chromium tab capture supplies it on every platform.
 	Capture func() (io.ReadCloser, error)
+	// SuspendSilence parks client playback while Chromium emits only zero PCM.
+	// The first real sample resumes playback before its PCM chunk is delivered.
+	SuspendSilence bool
 }
 
 type AudioChunk struct {
@@ -105,6 +112,10 @@ type AudioChunk struct {
 	// T is when this chunk was read from tab capture, before fan-out —
 	// mirrors AccessUnit.T, used to measure per-subscriber queueing delay.
 	T time.Time
+	// Suspended and Resumed are ordered control edges in the same subscription
+	// lane as PCM, so playback state cannot race audio data.
+	Suspended bool
+	Resumed   bool
 }
 
 type AudioSubscription struct {
@@ -122,6 +133,9 @@ type AudioPipeline struct {
 	seq       uint32
 	stopTimer *time.Timer
 	drops     atomic.Uint64
+	// silenceSuspended is guarded by mu so a subscriber joining an already
+	// parked capture receives the same playback state as existing clients.
+	silenceSuspended bool
 }
 
 func (s *AudioPipeline) Stats() map[string]uint64 {
@@ -143,6 +157,9 @@ func (s *AudioPipeline) Subscribe() *AudioSubscription {
 	}
 	if !s.running {
 		s.startLocked()
+	}
+	if s.cfg.SuspendSilence && s.silenceSuspended {
+		sub.C <- AudioChunk{Suspended: true, T: time.Now()}
 	}
 	return sub
 }
@@ -169,6 +186,7 @@ func (sub *AudioSubscription) Close() {
 }
 
 func (s *AudioPipeline) startLocked() {
+	s.silenceSuspended = false
 	if s.cfg.Capture == nil {
 		log.Printf("audio: capture unsupported on this platform")
 		s.failAllLocked()
@@ -191,6 +209,7 @@ func (s *AudioPipeline) startLocked() {
 func (s *AudioPipeline) readLoop(r io.Reader, runID uint64) {
 	buf := make([]byte, chunkBytes)
 	var signal pcmSignalWindow
+	silentChunks := 0
 	for {
 		if _, err := io.ReadFull(r, buf); err != nil {
 			break
@@ -201,6 +220,7 @@ func (s *AudioPipeline) readLoop(r io.Reader, runID uint64) {
 			logs.Info("audio", "Chromium tab-capture PCM signal sample", signal.fields())
 			signal.reset()
 		}
+		hasSignal := pcmHasSignal(data)
 		s.mu.Lock()
 		if runID != s.runID || !s.running {
 			s.mu.Unlock()
@@ -208,6 +228,29 @@ func (s *AudioPipeline) readLoop(r io.Reader, runID uint64) {
 		}
 		s.seq++
 		chunk := AudioChunk{Seq: s.seq, SampleRate: sampleRate, Channels: channels, Data: data, T: time.Now()}
+		transition := ""
+		if s.cfg.SuspendSilence {
+			if hasSignal {
+				silentChunks = 0
+				if s.silenceSuspended {
+					chunk.Resumed = true
+					s.silenceSuspended = false
+					transition = "resumed"
+				}
+			} else {
+				silentChunks++
+				if s.silenceSuspended {
+					s.mu.Unlock()
+					continue
+				}
+				if silentChunks >= audioSuspendSilentChunks {
+					chunk.Data = nil
+					chunk.Suspended = true
+					s.silenceSuspended = true
+					transition = "suspended"
+				}
+			}
+		}
 		for sub := range s.subs {
 			select {
 			case sub.C <- chunk:
@@ -227,15 +270,28 @@ func (s *AudioPipeline) readLoop(r io.Reader, runID uint64) {
 			}
 		}
 		s.mu.Unlock()
+		if transition != "" {
+			log.Printf("audio: silent stream %s", transition)
+		}
 	}
 	s.mu.Lock()
 	if runID == s.runID {
 		log.Printf("audio: capture stopped")
 		s.running = false
 		s.capture = nil
+		s.silenceSuspended = false
 		s.failAllLocked()
 	}
 	s.mu.Unlock()
+}
+
+func pcmHasSignal(data []byte) bool {
+	for _, value := range data {
+		if value != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *AudioPipeline) stopLocked() {
@@ -245,6 +301,7 @@ func (s *AudioPipeline) stopLocked() {
 	}
 	s.running = false
 	s.capture = nil
+	s.silenceSuspended = false
 }
 
 func (s *AudioPipeline) failAllLocked() {

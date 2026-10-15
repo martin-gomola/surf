@@ -36,6 +36,8 @@
     * { box-sizing: border-box; }
     html, body { min-height: 100%; margin: 0; }
     body { background: var(--bg); }
+    body[data-runtime="docker"] [data-desktop-only] { display: none !important; }
+    body.dashboard-locked main > :not(.hero):not(.page-footer) { display: none !important; }
     button, input, select, textarea { font: inherit; }
     button { color: inherit; }
     .shell { min-height: 100vh; }
@@ -92,6 +94,7 @@
     .metric-value { font-size: 20px; font-weight: 600; margin-top: 5px; }
     .metric-unit { color: var(--quiet); font-size: 11px; margin-left: 3px; }
     .grid { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 16px; }
+    .grid.docker-single { grid-template-columns: 1fr; }
     .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: -18px -18px 14px; padding: 13px 18px; border-bottom: 1px solid var(--line); }
     .panel-actions { display: flex; align-items: center; gap: 8px; }
     .panel-copy { color: var(--muted); font-size: 12px; margin: 4px 0 0; line-height: 1.4; }
@@ -119,7 +122,7 @@
     textarea { min-height: 84px; resize: vertical; line-height: 1.45; }
     select {
       color: var(--ink); background-color: var(--field); border: 1px solid var(--line-strong);
-      border-radius: 6px; padding: 7px 30px 7px 9px;
+      border-radius: 6px; padding: 7px 9px; padding-inline-end: 30px;
       appearance: none; -webkit-appearance: none;
       background-image:
         linear-gradient(45deg, transparent 50%, var(--muted) 50%),
@@ -312,13 +315,13 @@
               <div class="endpoint" id="endpoint">Loading local endpoint…</div>
             </div>
           </div>
-          <div class="hero-actions">
+          <div class="hero-actions" data-desktop-only>
             <button class="button secondary" id="update-button" type="button">Check for updates</button>
             <button class="button secondary" id="restart-overview" type="button">Restart engine</button>
           </div>
       </div>
 
-      <section class="panel" id="browser-setup" aria-labelledby="browser-setup-title">
+      <section class="panel" id="browser-setup" aria-labelledby="browser-setup-title" data-desktop-only>
         <h2 id="browser-setup-title">Browser setup</h2>
         <p class="panel-copy" id="browser-mode-copy" role="status" aria-live="polite">Use Surf’s browser on this computer to sign in or change browser settings. Connected devices pause until you close the browser.</p>
         <div class="hero-actions">
@@ -328,7 +331,7 @@
         </div>
       </section>
 
-      <div class="panel first-run" id="first-run">
+      <div class="panel first-run" id="first-run" data-desktop-only>
         <h2>Start Surf automatically?</h2>
         <p class="panel-copy">Clients can connect while Surf is running.</p>
       </div>
@@ -340,8 +343,8 @@
           <div class="metric"><div class="metric-label">Media drops</div><div class="metric-value" id="metric-drops">—</div></div>
       </div>
 
-      <div class="grid">
-        <div class="panel">
+      <div class="grid" id="main-grid">
+        <div class="panel" id="connection-panel" data-desktop-only>
           <div class="panel-head"><div><h2>Connection</h2></div></div>
           <form id="settings-form">
             <div class="credential"><div class="credential-label">Server address</div><div class="copy-row"><div class="copy-value" id="lan-address">Loading…</div><button class="button secondary small" data-copy="lan-address" type="button">Copy</button></div></div>
@@ -452,6 +455,18 @@
 
   <script>
     const $ = id => document.getElementById(id);
+    const dockerDashboard = document.body.dataset.runtime === 'docker';
+    let dashboardToken = '';
+    if (dockerDashboard) {
+      const fragment = new URLSearchParams(location.hash.slice(1));
+      const supplied = fragment.get('token');
+      if (supplied) {
+        sessionStorage.setItem('surf-dashboard-token', supplied);
+        history.replaceState(null, '', location.pathname + location.search);
+      }
+      dashboardToken = supplied || sessionStorage.getItem('surf-dashboard-token') || '';
+      $('main-grid').classList.add('docker-single');
+    }
     $('appearance').value = appearancePreference;
     $('appearance').addEventListener('change', event => {
       appearancePreference = event.target.value;
@@ -521,7 +536,17 @@
       const node = $('toast'); node.textContent = message; node.classList.add('show');
       clearTimeout(toastTimer); toastTimer = setTimeout(() => node.classList.remove('show'), 2600);
     }
+    function lockDashboard(message) {
+      document.body.classList.add('dashboard-locked');
+      $('server-title').textContent = 'Dashboard authorization required';
+      $('endpoint').textContent = message;
+      setOnline(false);
+    }
     async function request(path, options) {
+      options = options ? {...options} : {};
+      const headers = new Headers(options.headers || {});
+      if (dashboardToken) headers.set('X-Surf-Dashboard-Token', dashboardToken);
+      options.headers = headers;
       const response = await fetch(path, options);
       if (!response.ok) throw new Error((await response.text()).trim() || `HTTP ${response.status}`);
       return response;
@@ -544,6 +569,9 @@
       $('port').value = config.port;
       $('start-at-login').checked = Boolean(config.startAtLogin);
       $('first-run').classList.toggle('show', !config.startupChoiceMade);
+      if (config.runtime === 'docker') {
+        $('endpoint').textContent = config.publicAddress || 'Docker deployment';
+      }
     }
     function setOnline(online) {
       $('hero-status').classList.toggle('offline', !online);
@@ -793,7 +821,7 @@
       const payload = await (await request('/api/backend/api/v1/admin/logs/sources')).json();
       logSources = [
         {id:'server', label:'Server', source:'server'},
-        {id:'desktop', label:'Desktop', source:'desktop'},
+        ...(dockerDashboard ? [] : [{id:'desktop', label:'Desktop', source:'desktop'}]),
         ...(payload.devices || []).map(device => ({
           id:`device:${device.id}`, label:`${device.name || 'Device'}${payload.online?.[device.id] ? ' · online' : ' · offline'}`,
           source:'device', deviceID:device.id
@@ -879,6 +907,7 @@
         logRecords = [];
         renderLogs(true);
         setLogLive('connecting', 'Connecting');
+        if (dashboardToken) params.set('dashboardToken', dashboardToken);
         const stream = new EventSource(`/api/backend/api/v1/admin/logs/stream?${params}`);
         logStream = stream;
         stream.onopen = () => { if (logStream === stream) setLogLive('live', 'Live'); };
@@ -924,7 +953,16 @@
     $('logs').addEventListener('toggle', () => { if ($('logs').open) startLogStream(); else stopLogStream(); });
 
     (async () => {
-      try { await loadConfig(); } catch (error) { toast(error.message); }
+      if (dockerDashboard && !dashboardToken) {
+        lockDashboard('Run make dashboard from the Surf project directory.');
+        return;
+      }
+      try { await loadConfig(); }
+      catch (error) {
+        if (dockerDashboard) lockDashboard(error.message);
+        else toast(error.message);
+        return;
+      }
       try {
         const session = await (await request('/api/backend/api/v1/admin/pairing/session')).json();
         if (session.active) renderPairingSession(session);
@@ -937,11 +975,13 @@
       if (location.hash === '#logs') $('logs').open = true;
       await pollStatus();
       setInterval(pollStatus, 2000);
-      if (location.hash === '#browser-setup-open') await browserAction('open');
-      if (location.hash === '#browser-resume') await browserAction('resume');
-      if (location.hash === '#restart-engine') await restart();
-      await updateStatus();
-      setInterval(updateStatus, 2000);
+      if (!dockerDashboard) {
+        if (location.hash === '#browser-setup-open') await browserAction('open');
+        if (location.hash === '#browser-resume') await browserAction('resume');
+        if (location.hash === '#restart-engine') await restart();
+        await updateStatus();
+        setInterval(updateStatus, 2000);
+      }
     })();
   </script>
 </body>

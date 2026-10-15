@@ -1,15 +1,25 @@
 services:
   surf:
     build:
-      context: .
+      context: ../..
+      dockerfile: packaging/docker/Dockerfile
       args:
         SURF_VERSION: ${SURF_VERSION:?set SURF_VERSION}
-        SURF_ARCH: ${SURF_ARCH:-amd64}
-        SURF_ARCHIVE_SHA256: ${SURF_ARCHIVE_SHA256:?set SURF_ARCHIVE_SHA256}
+        SURF_COMPATIBILITY: ${SURF_COMPATIBILITY:-1}
+        SURF_CLIENT_DEB_SHA256: ${SURF_CLIENT_DEB_SHA256:?set SURF_CLIENT_DEB_SHA256}
     restart: unless-stopped
     environment:
       SURF_SERVER_NAME: ${SURF_SERVER_NAME:-Surf}
       SURF_PUBLIC_ADDRESS: ${SURF_PUBLIC_ADDRESS:-}
+      SURF_TUNNEL_HOST: ${SURF_TUNNEL_HOST:-}
+      SURF_CONTENT_BLOCKER: ${SURF_CONTENT_BLOCKER:-true}
+      SURF_BROWSER_VISIBLE: "true"
+      SURF_ADAPTIVE_VIDEO: ${SURF_ADAPTIVE_VIDEO:-true}
+      SURF_SUSPEND_SILENT_AUDIO: ${SURF_SUSPEND_SILENT_AUDIO:-true}
+      STREAM_MAX_FPS: ${STREAM_MAX_FPS:-30}
+      SURF_DASHBOARD_ADDR: 0.0.0.0:18081
+      SURF_DASHBOARD_PUBLIC_URL: http://127.0.0.1:${SURF_DASHBOARD_PORT:-18081}/
+      DISPLAY: :99
       PORT: 8080
       SURF_HOME: /data/surf
       PROFILE: /data/profile
@@ -18,19 +28,20 @@ services:
       CHROME: /usr/bin/chromium
     ports:
       - "${SURF_PORT:-18080}:8080"
+      - "127.0.0.1:${SURF_DASHBOARD_PORT:-18081}:18081"
     shm_size: "1g"
     volumes:
-      - surf_runtime:/data/surf
-      - surf_profile:/data/profile
-      - surf_downloads:/data/downloads
-      - surf_uploads:/data/uploads
+      - ${SURF_DATA_ROOT}/runtime:/data/surf
+      - ${SURF_DATA_ROOT}/profile:/data/profile
+      - ${SURF_DATA_ROOT}/downloads:/data/downloads
+      - ${SURF_DATA_ROOT}/uploads:/data/uploads
 
-volumes:
-  surf_runtime:
-    name: ${SURF_RUNTIME_VOLUME:-surf_runtime}
-  surf_profile:
-    name: ${SURF_PROFILE_VOLUME:-surf_profile}
-  surf_downloads:
-    name: ${SURF_DOWNLOADS_VOLUME:-surf_downloads}
-  surf_uploads:
-    name: ${SURF_UPLOADS_VOLUME:-surf_uploads}
+  benchmark:
+    image: node:26-bookworm-slim
+    profiles: [tools]
+    network_mode: service:surf
+    depends_on: [surf]
+    command: ["node", "/benchmark-scroll.mjs", "${SURF_BENCHMARK_SECONDS:-60}"]
+    volumes:
+      - ${SURF_DATA_ROOT}/profile:/profile:ro
+      - ./benchmark-scroll.mjs:/benchmark-scroll.mjs:ro

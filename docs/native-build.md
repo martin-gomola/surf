@@ -7,8 +7,7 @@ The app links the C99 library under `client/core`. Run its host tests before
 using the iOS toolchain.
 
 ```sh
-make client-core-test
-make client-core-sanitize
+make client-test
 ```
 
 ## SDK
@@ -54,10 +53,11 @@ The image pins Theos commit
 `16362d3aa83a0acd56df4493d575d34306d42478`, iOS toolchain release
 `test-210562a`, and libplist 2.3.0. Downloads are checked by SHA 256.
 
-The root target runs the same build.
+The root target fetches the SDK, builds the pinned toolchain image, then builds
+and verifies the package.
 
 ```sh
-make native-package
+make client
 ```
 
 On Windows, Git Bash can fetch the SDK and Docker Desktop can run the build.
@@ -143,10 +143,3 @@ Hardware acceptance covers:
 
 Viewport logs must match the even sized page surface. Rotation and fullscreen
 must settle on one encoder generation without reconnecting.
-
-Build a release backend with the recorded package.
-
-```sh
-client_deb="$(cat client/ios/.theos/last_package)"
-make surf-binary CLIENT_DEB="client/ios/${client_deb#./}"
-```

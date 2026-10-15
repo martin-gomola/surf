@@ -79,29 +79,34 @@ var Caps = []string{
 }
 
 type Config struct {
-	SurfHome      string
-	BindAddr      string
-	Port          int
-	ChromePath    string
-	StartURL      string
-	Profile       string
-	ViewW         int
-	ViewH         int
-	ServerName    string
-	PublicAddress string
-	TunnelHost    string
-	DownloadsDir  string
-	UploadsDir    string
+	SurfHome           string
+	BindAddr           string
+	Port               int
+	ChromePath         string
+	StartURL           string
+	Profile            string
+	ViewW              int
+	ViewH              int
+	ServerName         string
+	PublicAddress      string
+	TunnelHost         string
+	DashboardAddr      string
+	DashboardPublicURL string
+	DownloadsDir       string
+	UploadsDir         string
 
 	ChromeNoSandbox    bool
+	BrowserVisible     bool
 	ContentBlocker     bool
 	ContentBlockerPath string
 	AdaptiveVideo      bool
+	SuspendSilentAudio bool
 
 	// H.264 lane. The encoder only runs while a native client is subscribed.
 	StreamScale     string // STREAM_SCALE, optional maximum; empty = client size
 	StreamBitrateK  int    // STREAM_BITRATE, primary variable-rate H.264 target
 	StreamQuantizer int    // STREAM_QUANTIZER, fallback H.264 QP 0..51; lower is sharper
+	StreamMaxFPS    int    // STREAM_MAX_FPS, 15..60; caps capture and encode cadence
 }
 
 func envInt(key string, def int) int {
@@ -109,6 +114,11 @@ func envInt(key string, def int) int {
 		return v
 	}
 	return def
+}
+
+func envIntRange(key string, def, low, high int) int {
+	value := envInt(key, def)
+	return max(low, min(high, value))
 }
 
 func envStr(key, def string) string {
@@ -156,25 +166,30 @@ func load() (*Config, error) {
 	viewW := envInt("VW", 768)
 	viewH := envInt("VH", 934)
 	cfg := &Config{
-		SurfHome:        home,
-		BindAddr:        envStr("BIND_ADDR", "0.0.0.0"),
-		Port:            envInt("PORT", 18080),
-		ChromePath:      os.Getenv("CHROME"),
-		StartURL:        envStr("START_URL", "https://www.google.com"),
-		Profile:         envStr("PROFILE", filepath.Join(home, "profile")),
-		ViewW:           viewW,
-		ViewH:           viewH,
-		ServerName:      envStr("SURF_SERVER_NAME", "Surf"),
-		PublicAddress:   os.Getenv("SURF_PUBLIC_ADDRESS"),
-		TunnelHost:      strings.ToLower(strings.TrimSpace(os.Getenv("SURF_TUNNEL_HOST"))),
-		DownloadsDir:    envStr("DOWNLOADS", filepath.Join(home, "downloads")),
-		UploadsDir:      envStr("UPLOADS", filepath.Join(home, "uploads")),
-		ChromeNoSandbox: envBool("CHROME_NO_SANDBOX", os.Geteuid() == 0),
-		ContentBlocker:  envBool("SURF_CONTENT_BLOCKER", true),
-		AdaptiveVideo:   envBool("SURF_ADAPTIVE_VIDEO", false),
-		StreamScale:     envStr("STREAM_SCALE", ""),
-		StreamBitrateK:  envInt("STREAM_BITRATE", 16000),
-		StreamQuantizer: envInt("STREAM_QUANTIZER", 12),
+		SurfHome:           home,
+		BindAddr:           envStr("BIND_ADDR", "0.0.0.0"),
+		Port:               envInt("PORT", 18080),
+		ChromePath:         os.Getenv("CHROME"),
+		StartURL:           envStr("START_URL", "https://www.google.com"),
+		Profile:            envStr("PROFILE", filepath.Join(home, "profile")),
+		ViewW:              viewW,
+		ViewH:              viewH,
+		ServerName:         envStr("SURF_SERVER_NAME", "Surf"),
+		PublicAddress:      os.Getenv("SURF_PUBLIC_ADDRESS"),
+		TunnelHost:         strings.ToLower(strings.TrimSpace(os.Getenv("SURF_TUNNEL_HOST"))),
+		DashboardAddr:      strings.TrimSpace(os.Getenv("SURF_DASHBOARD_ADDR")),
+		DashboardPublicURL: strings.TrimSpace(os.Getenv("SURF_DASHBOARD_PUBLIC_URL")),
+		DownloadsDir:       envStr("DOWNLOADS", filepath.Join(home, "downloads")),
+		UploadsDir:         envStr("UPLOADS", filepath.Join(home, "uploads")),
+		ChromeNoSandbox:    envBool("CHROME_NO_SANDBOX", os.Geteuid() == 0),
+		BrowserVisible:     envBool("SURF_BROWSER_VISIBLE", false),
+		ContentBlocker:     envBool("SURF_CONTENT_BLOCKER", true),
+		AdaptiveVideo:      envBool("SURF_ADAPTIVE_VIDEO", false),
+		SuspendSilentAudio: envBool("SURF_SUSPEND_SILENT_AUDIO", false),
+		StreamScale:        envStr("STREAM_SCALE", ""),
+		StreamBitrateK:     envInt("STREAM_BITRATE", 16000),
+		StreamQuantizer:    envInt("STREAM_QUANTIZER", 12),
+		StreamMaxFPS:       envIntRange("STREAM_MAX_FPS", 60, 15, 60),
 	}
 	return cfg, nil
 }

@@ -8,15 +8,20 @@
   Surf brings the modern web to older iPhones, iPod touches, and iPads.
 </p>
 
+> [!NOTE]
+> This fork supports a Docker host only. Native desktop source remains in the
+> repository temporarily for upstream synchronization, but it is excluded from
+> the supported build, test, deployment, and release workflow.
+
 <p align="center">
-  <a href="https://github.com/seg6/surf/releases/latest">Download Surf</a> ·
-  <a href="#quick-start">Get started</a> ·
+  <a href="#quick-start">Docker setup</a> ·
+  <a href="https://seg6.space/surf/">iOS app</a> ·
   <a href="#documentation">Documentation</a>
 </p>
 
-Websites run in Chromium on a Windows, macOS, or Linux computer and stream to
-your device. You browse through a native iOS app with touch, keyboard input,
-video, and audio, without being limited by the device's outdated web engine.
+Websites run in headed Chromium inside Docker and stream to your device. You
+browse through a native iOS app with touch, keyboard input, video, and audio,
+without being limited by the device's outdated web engine.
 
 The iOS app has native tabs, an address bar, bookmarks, history, downloads,
 uploads, sharing, fullscreen media, and separate phone and tablet layouts.
@@ -83,42 +88,34 @@ mean each device and OS combination has been tested on hardware.
 
 </details>
 
-The host computer must run a 64 bit version of Windows, macOS 12 or later, or
-Linux. Both x86_64 and ARM Linux hosts are supported.
+The host computer needs a 64-bit Docker environment. The image builds for
+x86_64 and ARM64 Linux containers; macOS and Windows hosts require Docker
+Desktop or an equivalent Linux-container runtime.
 
 ## Quick start
 
 ### Start the host
 
-Download a host package from the
-[latest release](https://github.com/seg6/surf/releases/latest).
-
-The desktop app includes settings, pairing, device management, logs, clipboard
-sync, and updates. A terminal or server installation runs in the foreground.
+Copy the Docker environment template, set the public address, then start Surf.
 
 ```sh
-./surf serve
+cp packaging/docker/.env.example packaging/docker/.env
+# Edit packaging/docker/.env for this host.
+make up
 ```
 
-Useful commands from another terminal are:
+`make up` prints clickable links for Surf and its authenticated local dashboard.
+Useful commands are:
 
 ```sh
-surf status
-surf pair
-surf devices list
-surf quit
+make dashboard
+make links
+make benchmark
+make down
 ```
 
-Surf listens on port `18080` by default. Windows archives contain `surf.exe`.
-
-To sign in or change settings in Surf's browser on the computer, choose
-**Browser setup…** in the tray/dashboard or run `surf browser`. Connected
-devices pause until you close the setup windows or choose to resume.
-See [browser setup](docs/backend.md#browser-setup-on-the-computer) for standalone
-use, confirmations and what carries over.
-
-Updates install over the existing copy. `SURF_HOME` contains the server
-identity, paired devices, and browser profile, so it should remain in place.
+Persistent server identity, pairings, Chromium profile, and downloads live
+under the configured `SURF_DATA_ROOT` and survive container replacement.
 
 ### Install the iOS app
 
@@ -142,8 +139,8 @@ Older jailbreaks may reject `uicache` when it runs as `root`. Run it as
 
 ### Pair
 
-Open **Paired Devices** on the host and choose **Pair device**. A headless host
-uses `surf pair`. Each invitation accepts one device.
+Run `make dashboard`, then choose **Pair device**. Each invitation accepts one
+device.
 
 Camera equipped devices can scan the QR code. Manual pairing uses the host
 address and six digit code, then compares the same six words on both ends.
@@ -161,11 +158,9 @@ differ from the listener address.
 
 Cloudflare Tunnel can carry the pinned Surf connection for remote access.
 
-```sh
-SURF_PUBLIC_ADDRESS=surf-roam.example.net:443 \
-SURF_TUNNEL_HOST=surf-roam.example.net \
-./surf serve
-```
+Set `SURF_PUBLIC_ADDRESS=surf-roam.example.net:443` and
+`SURF_TUNNEL_HOST=surf-roam.example.net` in `packaging/docker/.env`, then run
+`make up`.
 
 The inner Surf connection remains encrypted between the device and host.
 Cloudflare can see connection metadata and encrypted traffic volume. A direct
@@ -175,10 +170,9 @@ See [Security](docs/security.md) for the trust model.
 
 ## Browser support
 
-Surf uses an installed Google Chrome, Microsoft Edge, or Chromium when one is
-compatible. Otherwise it installs a verified ungoogled Chromium build in
-`SURF_HOME`. Capture and content blocking extensions are loaded through the
-DevTools extension API.
+The Docker image provides Debian Chromium and runs it headed on an isolated X
+virtual display. Capture and content blocking extensions are loaded through
+the DevTools extension API.
 
 Video and audio come from Chromium tab capture. FFmpeg, PulseAudio, virtual
 audio devices, and desktop capture are not required on the host.
@@ -190,46 +184,25 @@ browser session.
 The optional adaptive video mode changes frame rate when an old device falls
 behind. It does not reduce the page viewport or render size.
 
-Surf does not include Widevine. Protected sites can use a working Widevine CDM
-provided by the selected host browser, subject to the site's own rules.
+The Docker image does not include Widevine. DRM-protected streaming services
+may reject playback.
 
-## Build
+## Build and test
 
-Build the backend and a package for the current host.
+Build and deploy the Docker image with `make up`. Run the backend and shared
+client-core tests in Docker with `make test`.
 
-```sh
-make surf-binary
-make surf-dist
-```
-
-The release target builds the desktop archives. Linux AppImage builds need
-`appimagetool`, and Windows installer builds need `makensis` from NSIS.
-
-```sh
-APPIMAGETOOL=/path/to/appimagetool make surf-release-dist \
-  CLIENT_DEB=path/to/space.seg6.surf_VERSION_iphoneos-arm.deb
-```
-
-macOS archives contain Intel or Apple Silicon `Surf.app` bundles. Their build
-does not require Xcode, an Apple SDK, signing, or a macOS host.
+After changing the iOS client, run `make client` to build and verify its Debian
+package. Run `make client-test` for the shared portable client core alone.
 
 The universal iOS package uses a pinned Linux, WSL2, or Docker environment.
 See [Native Build](docs/native-build.md).
-
-Run the normal test suite with `make test`. Backend download tests include a
-real Chromium round trip using a temporary profile and local HTTP fixtures.
-They discover an installed Chrome/Chromium automatically; `SURF_TEST_BROWSER`
-can select another executable. Without Chromium these tests explicitly skip
-locally and fail in CI. No separate download-test command or CI step is needed.
 
 ## Documentation
 
 - [Backend](docs/backend.md)
 - [Client architecture](docs/client-architecture.md)
-- [Linux client and development tools](client/desktop/README.md)
-- [Porting clients](docs/porting-clients.md)
 - [Protocol](docs/protocol.md)
-- [Versioning](docs/versioning.md)
 - [Native build](docs/native-build.md)
 - [Security](docs/security.md)
 - [Troubleshooting](docs/troubleshooting.md)

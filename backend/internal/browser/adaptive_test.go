@@ -215,9 +215,26 @@ func TestGovernorDoesNotCarryOneBadSampleIntoHealthyDownshift(t *testing.T) {
 }
 
 func TestAdaptiveEncoderSettingsCoordinateEveryLever(t *testing.T) {
-	cfg := &config.Config{StreamBitrateK: 16000, StreamQuantizer: 12}
+	cfg := &config.Config{StreamBitrateK: 16000, StreamQuantizer: 12, StreamMaxFPS: 60}
 	maxW, maxH, bitrate, quantizer, fps := adaptiveEncoderSettings(adaptiveProfiles[2], cfg, 768, 974)
 	if maxW != 0 || maxH != 0 || bitrate != 16000 || quantizer != 14 || fps != 40 {
 		t.Fatalf("balanced settings = %dx%d %dk qp=%d fps=%d", maxW, maxH, bitrate, quantizer, fps)
+	}
+}
+
+func TestAdaptiveEncoderSettingsHonorFrameRateCap(t *testing.T) {
+	cfg := &config.Config{StreamBitrateK: 16000, StreamQuantizer: 12, StreamMaxFPS: 30}
+	want := []int{30, 25, 20, 15}
+	for index, profile := range adaptiveProfiles {
+		_, _, _, _, fps := adaptiveEncoderSettings(profile, cfg, 768, 974)
+		if fps != want[index] {
+			t.Fatalf("profile %s fps=%d, want %d", profile.name, fps, want[index])
+		}
+	}
+}
+
+func TestVideoPipelineConfigKeepsLegacyDefaultForProgrammaticConfig(t *testing.T) {
+	if got := videoPipelineConfig(&config.Config{}).FrameRate; got != 60 {
+		t.Fatalf("FrameRate=%d, want legacy default 60", got)
 	}
 }

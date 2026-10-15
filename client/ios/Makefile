@@ -38,6 +38,23 @@ include $(THEOS_MAKE_PATH)/tool.mk
 
 after-stage::
 	@mkdir -p $(THEOS_STAGING_DIR)/Applications/Surf.app
+	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-57.png
+	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-57@2x.png
+	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-72.png
+	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-72@2x.png
+	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-144.png
+	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-60.png
+	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-60@2x.png
+	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-60@3x.png
+	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-76.png
+	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-76@2x.png
+	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-167.png
+	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-classic-60.png
+	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-classic-60@2x.png
+	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-classic-60@3x.png
+	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-classic-76.png
+	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-classic-76@2x.png
+	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-classic-167.png
 	@cp Resources/icon-57.png $(THEOS_STAGING_DIR)/Applications/Surf.app/Icon.png
 	@cp Resources/icon-57@2x.png $(THEOS_STAGING_DIR)/Applications/Surf.app/Icon@2x.png
 	@cp Resources/icon-72.png $(THEOS_STAGING_DIR)/Applications/Surf.app/Icon-72.png
@@ -57,23 +74,6 @@ after-stage::
 	@cp Resources/icon-76@2x.png $(THEOS_STAGING_DIR)/Applications/Surf.app/IconSets/Modern/Icon-76@2x~ipad.png
 	@cp Resources/icon-167.png $(THEOS_STAGING_DIR)/Applications/Surf.app/IconSets/Modern/Icon-83.5@2x.png
 	@cp $(THEOS_STAGING_DIR)/Applications/Surf.app/IconSets/Modern/* $(THEOS_STAGING_DIR)/Applications/Surf.app/
-	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-57.png
-	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-57@2x.png
-	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-72.png
-	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-72@2x.png
-	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-144.png
-	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-60.png
-	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-60@2x.png
-	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-60@3x.png
-	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-76.png
-	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-76@2x.png
-	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-167.png
-	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-classic-60.png
-	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-classic-60@2x.png
-	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-classic-60@3x.png
-	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-classic-76.png
-	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-classic-76@2x.png
-	@rm -f $(THEOS_STAGING_DIR)/Applications/Surf.app/icon-classic-167.png
 	@cp Resources/brand-mark.png $(THEOS_STAGING_DIR)/Applications/Surf.app/brand-mark.png
 	@cp Resources/Lucide.ttf $(THEOS_STAGING_DIR)/Applications/Surf.app/Lucide.ttf
 	@mkdir -p $(THEOS_STAGING_DIR)/Applications/Surf.app/ThirdPartyNotices

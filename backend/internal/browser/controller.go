@@ -175,7 +175,10 @@ func New(cfg *config.Config, hub *transport.Hub) (*Controller, error) {
 	if err != nil {
 		return nil, fmt.Errorf("initialize tab capture: %w", err)
 	}
-	audioCfg := media.AudioConfig{Capture: capture.OpenAudio}
+	audioCfg := media.AudioConfig{
+		Capture:        capture.OpenAudio,
+		SuspendSilence: cfg.SuspendSilentAudio,
+	}
 	videoCfg := videoPipelineConfig(cfg)
 	var b *Controller
 	videoCfg.Start = func(settings media.VideoStartConfig) error {
@@ -271,6 +274,7 @@ func (b *Controller) Start() (err error) {
 		W:               b.cfg.ViewW,
 		H:               b.cfg.ViewH,
 		NoSandbox:       b.cfg.ChromeNoSandbox,
+		Visible:         b.cfg.BrowserVisible,
 		ExtensionPaths:  extensionPaths,
 		ContinueSession: b.exactSession,
 	})
@@ -333,8 +337,12 @@ func (b *Controller) Start() (err error) {
 	if err != nil {
 		return err
 	}
-	log.Printf("browser ready, view %dx%d (headless-new, source=tabCapture/WebCodecs, profile %s)",
-		b.viewW, b.viewH, b.cfg.Profile)
+	mode := "headless-new"
+	if b.cfg.BrowserVisible {
+		mode = "headed"
+	}
+	log.Printf("browser ready, view %dx%d (%s, source=tabCapture/WebCodecs, profile %s)",
+		b.viewW, b.viewH, mode, b.cfg.Profile)
 	started = true
 	return nil
 }
