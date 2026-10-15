@@ -424,6 +424,11 @@
           <div class="health-row"><span>Chromium capture</span><strong id="health-capture">—</strong></div>
           <div class="health-row"><span>H.264 subscribers</span><strong id="health-video">—</strong></div>
           <div class="health-row"><span>Audio subscribers</span><strong id="health-audio">—</strong></div>
+          <div class="health-row"><span>Stream profile</span><strong id="health-profile">—</strong></div>
+          <div class="health-row"><span>iPad decode / presented</span><strong id="health-client-fps">—</strong></div>
+          <div class="health-row"><span>iPad drops / queue</span><strong id="health-client-pressure">—</strong></div>
+          <div class="health-row"><span>Governor</span><strong id="health-governor">—</strong></div>
+          <div class="health-row"><span>Encode / input-to-image</span><strong id="health-latency">—</strong></div>
         </div>
       </div>
 
@@ -592,6 +597,23 @@
         $('health-capture').textContent = stats.casting ? 'Active' : 'Idle';
         $('health-video').textContent = stats.videoSubs ?? 0;
         $('health-audio').textContent = stats.audioSubs ?? 0;
+        $('health-profile').textContent = `${stats.streamProfile || '—'} · ${stats.streamTargetFPS || '—'} fps`;
+        const media = Array.isArray(stats.clientMedia) && stats.clientMedia.length
+          ? stats.clientMedia.reduce((best, item) => !best || Number(item.ageSeconds) < Number(best.ageSeconds) ? item : best, null)
+          : null;
+        $('health-client-fps').textContent = media
+          ? `${Number(media.decodeFps).toFixed(1)} / ${Number(media.presentedFps).toFixed(1)} fps`
+          : 'No client report';
+        $('health-client-pressure').textContent = media
+          ? `${Number(media.dropPercent).toFixed(1)}% · queue ${media.queueDepth}`
+          : '—';
+        $('health-governor').textContent = media
+          ? `${media.decision} · ${media.reason}`
+          : '—';
+        const performance = stats.performance || {};
+        $('health-latency').textContent = Object.keys(performance).length
+          ? `${Number(performance.encode_mean_ms || 0).toFixed(1)} / ${Number(performance.input_to_image_mean_ms || 0).toFixed(1)} ms`
+          : 'Waiting for sample';
       } catch { setOnline(false); }
     }
     async function restart() {

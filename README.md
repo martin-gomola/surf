@@ -101,6 +101,7 @@ Copy the Docker environment template, set the public address, then start Surf.
 ```sh
 cp packaging/docker/.env.example packaging/docker/.env
 # Edit packaging/docker/.env for this host.
+make client
 make up
 ```
 
@@ -192,8 +193,10 @@ may reject playback.
 Build and deploy the Docker image with `make up`. Run the backend and shared
 client-core tests in Docker with `make test`.
 
-After changing the iOS client, run `make client` to build and verify its Debian
-package. Run `make client-test` for the shared portable client core alone.
+After changing the iOS client, run `make client` to build, verify, and stage its
+Debian package for the next Docker build. Surf embeds that exact package and can
+offer it to older paired clients. Run `make client-test` for the shared portable
+client core alone.
 
 The universal iOS package uses a pinned Linux, WSL2, or Docker environment.
 See [Native Build](docs/native-build.md).

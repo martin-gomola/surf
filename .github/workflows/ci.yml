@@ -28,9 +28,6 @@ jobs:
       - name: Test Docker backend and shared client core
         run: make test
 
-      - name: Build runtime image
-        run: cp packaging/docker/.env.example packaging/docker/.env && docker compose -f packaging/docker/docker-compose.yml build surf
-
       - name: Verify tracked files stayed clean
         run: git diff --exit-code
 
@@ -65,6 +62,9 @@ jobs:
 
       - name: Build and verify package
         run: make client
+
+      - name: Build runtime image with matching client
+        run: cp packaging/docker/.env.example packaging/docker/.env && docker compose -f packaging/docker/docker-compose.yml build surf
 
       - name: Verify tracked files stayed clean
         run: git diff --exit-code

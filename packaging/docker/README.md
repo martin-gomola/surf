@@ -10,8 +10,9 @@ This keeps the browser compatible with sites that reject Chrome's explicit
 headless mode; the virtual display is private to the container and does not
 open a window on the Mac desktop.
 
-From the project root, use `make up` to build and start Surf in the background,
-and `make down` to stop it. Browser data and device pairings are preserved.
+From the project root, run `make client` once to build and stage the matching
+iOS package, then use `make up` to build and start Surf in the background. Use
+`make down` to stop it. Browser data and device pairings are preserved.
 After startup, `make up` prints clickable links for the public Surf endpoint
 and the authenticated local dashboard. Run `make links` to print them again.
 
@@ -30,7 +31,8 @@ available through the Surf public hostname, the LAN, or Cloudflare.
 ## Apple Silicon Mac setup
 
 The image builds the backend from this checkout and embeds the verified iOS
-package from Surf `0.17.0`. The package SHA-256 is pinned in `.env.example`.
+package staged by `make client`. The Docker build validates its version,
+compatibility generation, size, and SHA-256 before compiling the backend.
 Before starting, replace `surf.example.com` in `.env` with your NPM hostname.
 The environment file enables Surf's WebSocket tunnel and sets `SURF_DATA_ROOT`
 to the mac-mini host-volume path. In Nginx Proxy Manager, route the hostname to
@@ -41,6 +43,7 @@ pinned TLS stream stays inside the WebSocket tunnel.
 ```sh
 cp packaging/docker/.env.example packaging/docker/.env
 # Edit packaging/docker/.env for your server before starting.
+make client
 make up
 cd packaging/docker
 docker compose exec surf surf pair
@@ -108,4 +111,7 @@ make benchmark
 ```
 
 The benchmark runs only on demand, shares Surf's network namespace, and does
-not expose another port or install tooling in the Surf container.
+not expose another port or install tooling in the Surf container. It records
+Docker CPU and memory before and after the run plus the server's encode,
+input-to-image, client decode, presentation, drop, queue, and governor data.
+Reports are written under `.local/benchmarks/`.

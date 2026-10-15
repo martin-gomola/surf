@@ -233,6 +233,28 @@ func TestAdaptiveEncoderSettingsHonorFrameRateCap(t *testing.T) {
 	}
 }
 
+func TestClientMediaSnapshotReportsDecoderAndGovernorState(t *testing.T) {
+	b := &Controller{
+		cfg:         &config.Config{StreamBitrateK: 16000, StreamQuantizer: 12, StreamMaxFPS: 30},
+		clientStats: map[string]clientMediaSnapshot{},
+	}
+	now := time.Unix(700, 0)
+	stats := healthyMediaStats(30)
+	stats.DropPercent = 1.5
+	b.recordClientMediaStats("device-1234567890", now, stats, adaptiveProfiles[1], "hold", "decoder throughput", 0.7)
+	snapshots := b.clientMediaSnapshots(now.Add(2 * time.Second))
+	if len(snapshots) != 1 {
+		t.Fatalf("snapshots=%d", len(snapshots))
+	}
+	got := snapshots[0]
+	if got.Device != "device-12345" || got.Profile != "motion" || got.Decision != "hold" || got.TargetFPS != 25 {
+		t.Fatalf("snapshot=%+v", got)
+	}
+	if got.DecodeFPS == 0 || got.PresentedFPS == 0 || got.DropPercent != 1.5 || got.AgeSeconds != 2 {
+		t.Fatalf("metrics=%+v", got)
+	}
+}
+
 func TestVideoPipelineConfigKeepsLegacyDefaultForProgrammaticConfig(t *testing.T) {
 	if got := videoPipelineConfig(&config.Config{}).FrameRate; got != 60 {
 		t.Fatalf("FrameRate=%d, want legacy default 60", got)

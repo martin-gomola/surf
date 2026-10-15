@@ -2,7 +2,6 @@ FROM golang:1.26.5-bookworm AS backend-source
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
-      curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -20,15 +19,11 @@ FROM backend-source AS builder
 
 ARG SURF_VERSION
 ARG SURF_COMPATIBILITY=1
-ARG SURF_CLIENT_DEB_SHA256
 
 RUN set -eux; \
-    client_deb="/tmp/surf-client.deb"; \
-    curl -fL "https://github.com/seg6/surf/releases/download/v${SURF_VERSION}/space.seg6.surf_${SURF_VERSION}-1_iphoneos-arm.deb" \
-      -o "$client_deb"; \
-    echo "${SURF_CLIENT_DEB_SHA256}  ${client_deb}" | sha256sum -c -; \
-    cp "$client_deb" backend/internal/web/client/client.deb; \
+    client_deb="internal/web/client/client.deb"; \
     cd backend; \
+    test -f "$client_deb"; \
     go run ./tools/clientbundlemeta \
       --deb "$client_deb" \
       --version "$SURF_VERSION" \

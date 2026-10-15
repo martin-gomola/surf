@@ -1,4 +1,4 @@
-.PHONY: test backend-test client client-test client-core-test native-sdk native-buildenv native-package up down links dashboard benchmark
+.PHONY: test backend-test client client-ready client-test client-core-test native-sdk native-buildenv native-package up down links dashboard benchmark
 
 DOCKERFILE := packaging/docker/Dockerfile
 
@@ -19,12 +19,22 @@ native-buildenv:
 	docker build -t surf-buildenv native/buildenv
 
 client: native-sdk native-buildenv
-	docker run --rm --network host -v "$(CURDIR):/src" surf-buildenv bash -c \
+	docker run --rm -v "$(CURDIR):/src" surf-buildenv bash -c \
 		'make -C /src/client/ios clean package DEBUG=0 && bash /src/client/ios/verify-package.sh'
+	@package="$$(tr -d '\r\n' < client/ios/.theos/last_package)"; \
+	case "$$package" in /*) ;; *) package="$(CURDIR)/client/ios/$${package#./}" ;; esac; \
+	test -f "$$package"; \
+	cp "$$package" backend/internal/web/client/client.deb; \
+	printf 'Staged custom client: %s\n' "$$package"
 
 native-package: client
 
-up:
+client-ready:
+	@test -f backend/internal/web/client/client.deb || { \
+		echo "Custom iOS client is not staged; run 'make client' first." >&2; exit 1; \
+	}
+
+up: client-ready
 	cd "$(CURDIR)/packaging/docker" && docker compose up -d --build
 	@$(MAKE) --no-print-directory links
 
@@ -44,7 +54,11 @@ links:
 		printf '\nSurf:  %s\nAdmin: %s\n\n' "$$server" "$$admin"
 
 dashboard:
-	open "$$(cd "$(CURDIR)/packaging/docker" && docker compose exec -T surf surf dashboard-url)"
+	@url="$$(cd "$(CURDIR)/packaging/docker" && docker compose exec -T surf surf dashboard-url)"; \
+	if command -v open >/dev/null 2>&1; then open "$$url"; \
+	elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$$url"; \
+	elif command -v cmd.exe >/dev/null 2>&1; then cmd.exe /c start "" "$$url"; \
+	else printf '%s\n' "$$url"; fi
 
 benchmark:
-	cd "$(CURDIR)/packaging/docker" && docker compose --profile tools run --rm benchmark
+	packaging/docker/benchmark.sh

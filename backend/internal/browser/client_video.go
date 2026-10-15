@@ -203,9 +203,11 @@ func (b *Controller) stopVideo(c *transport.Client) {
 func (b *Controller) ClientDisconnected(c *transport.Client) {
 	b.touch.cancelClient(c)
 	b.pointer.cancelClient(c)
+	clientID := governorClientID(c)
 	b.mu.Lock()
-	b.governor.remove(governorClientID(c))
+	b.governor.remove(clientID)
 	b.mu.Unlock()
+	b.removeClientMediaStats(clientID)
 	b.mediaMu.Lock()
 	sub := b.videoSubs[c]
 	delete(b.videoSubs, c)

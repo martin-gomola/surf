@@ -86,17 +86,19 @@ type Controller struct {
 
 	downloads *downloadStore
 
-	video       *media.VideoPipeline
-	audio       *media.AudioPipeline
-	capture     *media.Capture
-	mediaMu     sync.Mutex // guards client media subscriptions below
-	lifecycleMu sync.RWMutex
-	inputMu     sync.RWMutex
-	alive       bool
-	suspended   bool
-	shutdown    sync.Once
-	videoSubs   map[*transport.Client]*media.VideoSubscription
-	audioSubs   map[*transport.Client]*media.AudioSubscription
+	video         *media.VideoPipeline
+	audio         *media.AudioPipeline
+	capture       *media.Capture
+	mediaMu       sync.Mutex // guards client media subscriptions below
+	clientStatsMu sync.Mutex
+	clientStats   map[string]clientMediaSnapshot
+	lifecycleMu   sync.RWMutex
+	inputMu       sync.RWMutex
+	alive         bool
+	suspended     bool
+	shutdown      sync.Once
+	videoSubs     map[*transport.Client]*media.VideoSubscription
+	audioSubs     map[*transport.Client]*media.AudioSubscription
 
 	startedAt time.Time
 	governor  streamGovernor
@@ -154,6 +156,7 @@ type Controller struct {
 	encodeTimeN        int
 	encodeTimeSumMS    float64
 	encodeTimeMaxMS    float64
+	lastPerformance    map[string]any
 
 	// verbMu guards the small M2 state: pending JS dialogs and the pending
 	// file-chooser interception (one at a time is plenty for one user).
@@ -207,6 +210,7 @@ func New(cfg *config.Config, hub *transport.Hub) (*Controller, error) {
 		capture:        capture,
 		videoSubs:      map[*transport.Client]*media.VideoSubscription{},
 		audioSubs:      map[*transport.Client]*media.AudioSubscription{},
+		clientStats:    map[string]clientMediaSnapshot{},
 		perfCounts:     map[string]int{},
 		commands:       make(chan controllerCommand, 256),
 		events:         make(chan cdp.Event, 512),
@@ -515,6 +519,7 @@ func (b *Controller) Stats() map[string]any {
 		activeURL = t.URL
 	}
 	vw, vh := b.viewW, b.viewH
+	profile := adaptiveProfiles[b.governor.profile]
 	widevine, widevineDetail := b.widevineState, b.widevineDetail
 	b.mu.Unlock()
 	b.mediaMu.Lock()
@@ -529,6 +534,10 @@ func (b *Controller) Stats() map[string]any {
 	latN, latSumMS, latMaxMS := b.perfLatN, b.perfLatSumMS, b.perfLatMaxMS
 	aLatN, aLatSumMS, aLatMaxMS := b.perfALatN, b.perfALatSumMS, b.perfALatMaxMS
 	motionStalls := b.motionStalls
+	lastPerformance := map[string]any{}
+	for key, value := range b.lastPerformance {
+		lastPerformance[key] = value
+	}
 	b.perfMu.Unlock()
 	latMeanMS := 0.0
 	if latN > 0 {
@@ -542,6 +551,7 @@ func (b *Controller) Stats() map[string]any {
 	if !since.IsZero() {
 		windowSec = time.Since(since).Seconds()
 	}
+	_, _, _, _, targetFPS := adaptiveEncoderSettings(profile, b.cfg, vw, vh)
 	stats := map[string]any{
 		"clients": b.hub.ClientCount(), "tabs": tabs, "activeURL": activeURL,
 		"view": fmt.Sprintf("%dx%d", vw, vh), "casting": b.video.Running(),
@@ -551,6 +561,8 @@ func (b *Controller) Stats() map[string]any {
 		"videoLatencyMeanMs": latMeanMS, "videoLatencyMaxMs": latMaxMS, "videoLatencyN": latN,
 		"audioLatencyMeanMs": aLatMeanMS, "audioLatencyMaxMs": aLatMaxMS, "audioLatencyN": aLatN,
 		"motionSourceStalls": motionStalls,
+		"streamProfile":      profile.name, "streamTargetFPS": targetFPS,
+		"clientMedia": b.clientMediaSnapshots(time.Now()), "performance": lastPerformance,
 	}
 	for key, value := range b.hub.Stats() {
 		stats[key] = value

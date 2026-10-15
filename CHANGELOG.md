@@ -5,6 +5,13 @@ version differences alone do not.
 
 ## Unreleased
 
+- Docker builds now embed the verified iOS client built from the same checkout
+  instead of downloading the upstream package. The fork uses app version
+  0.17.100 so existing 0.17.0 clients can receive the customized update.
+- Docker Compose now reports backend and Chromium health.
+- The Docker dashboard and benchmark now expose the iPad's decode and
+  presentation rates, drops, queue depth, adaptive governor decision, encoder
+  time, input latency, and host CPU and memory snapshots.
 - Desktop fullscreen now hides Surf's browser bar and gives the page the whole
   window. Player controls, Escape and F11 restore normal browsing on exit.
 
