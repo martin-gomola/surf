@@ -2,224 +2,155 @@
   <img src="backend/cmd/surf/surf-icon.png" alt="Surf icon" width="80" height="80">
 </p>
 
-<h1 align="center">Surf</h1>
+# Surf for legacy iPads
 
-<p align="center">
-  Surf brings the modern web to older iPhones, iPod touches, and iPads.
-</p>
+This fork runs modern websites in Chromium on a Docker host and streams them
+to a jailbroken iPhone or iPad. Its primary target is an iPad mini 3 running
+iOS 12.5.8, with sharp text and responsive scrolling for manga and ordinary
+web browsing.
 
-> [!NOTE]
-> This fork supports a Docker host only. Native desktop source remains in the
-> repository temporarily for upstream synchronization, but it is excluded from
-> the supported build, test, deployment, and release workflow.
+It is based on [seg6/surf](https://github.com/seg6/surf). This fork supports a
+Docker host and the native iOS client. The old desktop host code remains only
+to make upstream comparison easier.
 
-<p align="center">
-  <a href="#quick-start">Docker setup</a> ·
-  <a href="https://seg6.space/surf/">iOS app</a> ·
-  <a href="#documentation">Documentation</a>
-</p>
+## What this fork changes
 
-Websites run in headed Chromium inside Docker and stream to your device. You
-browse through a native iOS app with touch, keyboard input, video, and audio,
-without being limited by the device's outdated web engine.
+- Chromium runs headed under Xvfb so sites see a normal browser window.
+- No VNC service or VNC port is required.
+- Adaptive H.264 streaming keeps the native viewport and reduces frame rate
+  before image resolution.
+- The default legacy-device ceiling is 30 FPS.
+- Silent audio capture pauses automatically and resumes when audio starts.
+- A local authenticated dashboard manages pairing, devices, logs, and runtime
+  performance.
+- `make client` builds the jailbreak package from this checkout. Docker embeds
+  that exact package and can offer it to older paired clients.
+- CI checks the Docker backend, shared client core, iOS package, secrets, and
+  commit privacy.
 
-The iOS app has native tabs, an address bar, bookmarks, history, downloads,
-uploads, sharing, fullscreen media, and separate phone and tablet layouts.
+## Requirements
 
-## See it in action
+- A 64-bit macOS, Linux, or Windows host with Docker
+- A rootful jailbroken iOS device
+- Internet access during the first client and Docker builds
+- TCP port `18080` reachable from the iPad for direct LAN use
 
-https://github.com/user-attachments/assets/5e684036-9bbf-4fce-a088-0d95dcc1a890
+The iOS package contains armv7 and arm64 slices with minimum versions iOS 6
+and iOS 7 respectively. This fork is developed around iOS 12.5.8.
 
-50 seconds. Unmute for audio. [Download the video](docs/media/surf-demo.mp4?raw=true) ·
-[About the recording and credits](docs/media/README.md)
-
-## Compatibility
-
-The rootful `iphoneos-arm` package contains both client architectures.
-
-| Slice | Minimum OS | Hardware |
-| --- | --- | --- |
-| `armv7` | iOS 6.0 | 32 bit iPhone, iPod touch, and iPad models |
-| `arm64` | iOS 7.0 | A7 and newer devices through iOS 14 |
-
-The current target ends at iOS and iPadOS 14.8.1. A rootful jailbreak is
-required. iOS 15 and later, rootless packages, armv6 devices, iOS 5, and the
-original iPad are unsupported.
-
-A5 or newer hardware is recommended. The 256 MB iPhone 3GS and iPod touch 4
-can install the package but remain experimental.
-
-The main hardware test device is an original iPad mini running iOS 6.1.3.
-Pairing, saved servers, touch and keyboard input, video, audio, rotation, and
-fullscreen are tested there. Build support for other devices does not yet
-mean each device and OS combination has been tested on hardware.
-
-<details>
-<summary>Device and OS details</summary>
-
-### 32 bit devices
-
-| Models | Surf compatible OS range | Status |
-| --- | --- | --- |
-| iPhone 3GS | 6.0 to 6.1.6 | Experimental |
-| iPhone 4 | 6.0 to 7.1.2 | Legacy candidate |
-| iPhone 4s | 6.0 to 9.3.6 | Legacy candidate |
-| iPhone 5 | 6.0 to 10.3.4 | Good candidate |
-| iPhone 5c | 7.0 to 10.3.3 | Good candidate |
-| iPod touch 4 | 6.0 to 6.1.6 | Experimental |
-| iPod touch 5 | 6.0 to 9.3.5 | Legacy candidate |
-| iPad 2 and iPad 3 | 6.0 to 9.3.5, or 9.3.6 on cellular models | Legacy candidates |
-| iPad 4 | 6.0 to 10.3.3, or 10.3.4 on cellular models | Good candidate |
-| iPad mini 1 | 6.0 to 9.3.5, or 9.3.6 on cellular models | Verified on iOS 6.1.3 |
-
-### 64 bit devices
-
-| Models | Surf compatible OS range |
-| --- | --- |
-| iPhone 5s | 7.0 to 12.5.7 |
-| iPhone 6 and 6 Plus | 8.0 to 12.5.7 |
-| iPad Air 1 and iPad mini 2 | 7.0 to 12.5.7 |
-| iPad mini 3 | 8.0 to 12.5.7 |
-| iPod touch 6 | 8.4 to 12.5.7 |
-| iPhone 6s through iPhone 12, including SE 1 and SE 2 | Launch OS to 14.8.1 |
-| iPad Air 2 through 4, iPad mini 4 and 5, and iPad 5 through 8 | Launch OS to 14.8.1 |
-| iPad Pro models released through 2020 | Launch OS to 14.8.1 |
-| iPod touch 7 | 12.3 to 14.8.1 |
-
-</details>
-
-The host computer needs a 64-bit Docker environment. The image builds for
-x86_64 and ARM64 Linux containers; macOS and Windows hosts require Docker
-Desktop or an equivalent Linux-container runtime.
-
-## Quick start
-
-### Start the host
-
-Copy the Docker environment template, set the public address, then start Surf.
+## First setup
 
 ```sh
+git clone https://github.com/martin-gomola/surf.git
+cd surf
 cp packaging/docker/.env.example packaging/docker/.env
-# Edit packaging/docker/.env for this host.
+```
+
+Edit `packaging/docker/.env` before starting. The main settings are:
+
+```dotenv
+SURF_PUBLIC_ADDRESS=192.168.1.50:18080
+SURF_DATA_ROOT=${HOME}/srv/docker/surf
+STREAM_MAX_FPS=30
+```
+
+For a reverse proxy or Cloudflare Tunnel, set the public address and tunnel
+host to the public hostname and port `443`.
+
+```dotenv
+SURF_PUBLIC_ADDRESS=surf.example.net:443
+SURF_TUNNEL_HOST=surf.example.net
+```
+
+Build the matching iOS client, then start Surf:
+
+```sh
 make client
 make up
 ```
 
-`make up` prints clickable links for Surf and its authenticated local dashboard.
-Useful commands are:
+`make up` prints the Surf endpoint and a tokenized local dashboard URL.
+
+## Install the iOS client
+
+The verified package is written to `client/ios/packages/`. Install it through
+Filza or copy it over SSH:
 
 ```sh
-make dashboard
-make links
-make benchmark
-make down
-```
-
-Persistent server identity, pairings, Chromium profile, and downloads live
-under the configured `SURF_DATA_ROOT` and survive container replacement.
-
-### Install the iOS app
-
-Add the [Surf package repository](https://seg6.space/surf/) to Cydia or Sileo
-on the jailbroken device.
-
-```text
-https://seg6.space/surf/
-```
-
-The same page also offers the current `.deb`. A manual SSH installation uses:
-
-```sh
-scp space.seg6.surf_*.deb root@DEVICE_IP:/tmp/surf.deb
+scp client/ios/packages/space.seg6.surf_*.deb root@DEVICE_IP:/tmp/surf.deb
 ssh root@DEVICE_IP 'dpkg -i /tmp/surf.deb'
 ssh root@DEVICE_IP 'su mobile -c uicache || uicache || true'
 ```
 
-Older jailbreaks may reject `uicache` when it runs as `root`. Run it as
-`mobile`, then respring if the icon is still missing.
+Open Surf on the iPad, run `make dashboard`, and choose **Pair device**.
+Compare the six words shown on both devices before approving the pairing.
 
-### Pair
+## Daily commands
 
-Run `make dashboard`, then choose **Pair device**. Each invitation accepts one
-device.
+| Command | Purpose |
+| --- | --- |
+| `make up` | Build and start Surf |
+| `make down` | Stop Surf without deleting its data |
+| `make dashboard` | Open the authenticated local dashboard |
+| `make links` | Print the Surf and dashboard URLs |
+| `make benchmark` | Run a 60-second scrolling benchmark |
+| `make client` | Rebuild, verify, and stage the iOS package |
+| `make test` | Run backend and shared client-core tests |
 
-Camera equipped devices can scan the QR code. Manual pairing uses the host
-address and six digit code, then compares the same six words on both ends.
+Browser data, pairings, downloads, and the Chromium profile live under
+`SURF_DATA_ROOT`. Recreating the container keeps this data. This personal
+setup has no backup or restore command; delete the data directory when you
+want a completely fresh installation.
 
-```text
-192.168.1.50:18080
+## Performance
+
+The dashboard shows the current stream profile, target FPS, iPad decode and
+presented FPS, drops, queue depth, governor decision, encode time, and input
+latency.
+
+With the iPad connected and a page open, run:
+
+```sh
+make benchmark
 ```
 
-Use the host address and allow inbound TCP port `18080` through its firewall.
-The words confirm the server identity. Cancel pairing if they differ.
+Reports are saved under `.local/benchmarks/` with Docker CPU and memory plus
+the client and server media statistics. Raise `STREAM_MAX_FPS` only when the
+iPad sustains the current rate without drops or queue growth.
 
-Surf handles TLS directly. A LAN or VPS setup needs one reachable Surf port.
-Set `SURF_PUBLIC_ADDRESS=host:port` when the address in pairing codes must
-differ from the listener address.
+## Limitations
 
-Cloudflare Tunnel can carry the pinned Surf connection for remote access.
+- Widevine is not included, so DRM-protected video may fail.
+- Chromium runs inside Docker with `--no-sandbox` because Debian Chromium has
+  no usable sandbox in the current container runtime.
+- Cloudflare and other site challenges can expire. The persistent Chromium
+  profile keeps working sessions, but a site may require verification again.
+- The dashboard listens only on `127.0.0.1` and its URL contains a temporary
+  admin token. Do not share that URL.
+- Native desktop host packages, VNC, headless Chromium, and automatic backups
+  are outside this fork's scope.
 
-Set `SURF_PUBLIC_ADDRESS=surf-roam.example.net:443` and
-`SURF_TUNNEL_HOST=surf-roam.example.net` in `packaging/docker/.env`, then run
-`make up`.
+## Development
 
-The inner Surf connection remains encrypted between the device and host.
-Cloudflare can see connection metadata and encrypted traffic volume. A direct
-LAN endpoint gives lower local latency.
+```sh
+make test
+make client-test
+make client
+```
 
-See [Security](docs/security.md) for the trust model.
+The public branch must use a GitHub noreply commit address. The Privacy
+workflow rejects tracked credentials, absolute home paths, and detected
+secrets.
 
-## Browser support
+More details:
 
-The Docker image provides Debian Chromium and runs it headed on an isolated X
-virtual display. Capture and content blocking extensions are loaded through
-the DevTools extension API.
-
-Video and audio come from Chromium tab capture. FFmpeg, PulseAudio, virtual
-audio devices, and desktop capture are not required on the host.
-
-The stream matches the page area left by the native controls. Rotation, Surf
-fullscreen, and page fullscreen update that area without reconnecting the
-browser session.
-
-The optional adaptive video mode changes frame rate when an old device falls
-behind. It does not reduce the page viewport or render size.
-
-The Docker image does not include Widevine. DRM-protected streaming services
-may reject playback.
-
-## Build and test
-
-Build and deploy the Docker image with `make up`. Run the backend and shared
-client-core tests in Docker with `make test`.
-
-After changing the iOS client, run `make client` to build, verify, and stage its
-Debian package for the next Docker build. Surf embeds that exact package and can
-offer it to older paired clients. Run `make client-test` for the shared portable
-client core alone.
-
-The universal iOS package uses a pinned Linux, WSL2, or Docker environment.
-See [Native Build](docs/native-build.md).
-
-## Documentation
-
-- [Backend](docs/backend.md)
-- [Client architecture](docs/client-architecture.md)
-- [Protocol](docs/protocol.md)
-- [Native build](docs/native-build.md)
-- [Security](docs/security.md)
+- [Docker setup](packaging/docker/README.md)
+- [Native iOS build](docs/native-build.md)
 - [Troubleshooting](docs/troubleshooting.md)
+- [Security](docs/security.md)
+- [Protocol](docs/protocol.md)
 - [Changelog](CHANGELOG.md)
-
-## Support
-
-Donations are accepted on [Ko-fi](https://ko-fi.com/seg6_).
-
-## AI disclosure
-
-Surf is an AI-assisted project. Its direction, device testing, deployment
-decisions, and release judgment are human-directed.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). Original project by [seg6](https://github.com/seg6).
