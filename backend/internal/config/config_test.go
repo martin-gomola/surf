@@ -38,8 +38,11 @@ func clearConfigEnv(t *testing.T) {
 		"SURF_SERVER_NAME", "SURF_PUBLIC_ADDRESS", "DOWNLOADS", "UPLOADS",
 		"SURF_TUNNEL_HOST",
 		"CHROME_NO_SANDBOX",
+		"SURF_BROWSER_VISIBLE",
+		"SURF_DASHBOARD_ADDR", "SURF_DASHBOARD_PUBLIC_URL",
 		"SURF_ADAPTIVE_VIDEO",
-		"STREAM_SCALE", "STREAM_BITRATE", "STREAM_QUANTIZER",
+		"SURF_SUSPEND_SILENT_AUDIO",
+		"STREAM_SCALE", "STREAM_BITRATE", "STREAM_QUANTIZER", "STREAM_MAX_FPS",
 	} {
 		t.Setenv(key, "")
 	}
@@ -72,14 +75,69 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.ChromeNoSandbox {
 		t.Fatal("ChromeNoSandbox=true")
 	}
+	if cfg.BrowserVisible {
+		t.Fatal("BrowserVisible=true, want headless default")
+	}
+	if cfg.DashboardAddr != "" || cfg.DashboardPublicURL != "" {
+		t.Fatalf("dashboard defaults = %q %q, want disabled", cfg.DashboardAddr, cfg.DashboardPublicURL)
+	}
 	if cfg.StreamBitrateK != 16000 {
 		t.Fatalf("StreamBitrateK=%d, want 16000", cfg.StreamBitrateK)
 	}
 	if cfg.StreamQuantizer != 12 {
 		t.Fatalf("StreamQuantizer=%d, want 12", cfg.StreamQuantizer)
 	}
+	if cfg.StreamMaxFPS != 60 {
+		t.Fatalf("StreamMaxFPS=%d, want 60", cfg.StreamMaxFPS)
+	}
 	if cfg.AdaptiveVideo {
 		t.Fatal("AdaptiveVideo=true, want fixed native 60 FPS by default")
+	}
+	if cfg.SuspendSilentAudio {
+		t.Fatal("SuspendSilentAudio=true, want uninterrupted audio by default")
+	}
+}
+
+func TestDashboardCanBeEnabled(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("SURF_DASHBOARD_ADDR", "0.0.0.0:18081")
+	t.Setenv("SURF_DASHBOARD_PUBLIC_URL", "http://127.0.0.1:18081/")
+	cfg := loadConfig(t)
+	if cfg.DashboardAddr != "0.0.0.0:18081" || cfg.DashboardPublicURL != "http://127.0.0.1:18081/" {
+		t.Fatalf("dashboard config = %q %q", cfg.DashboardAddr, cfg.DashboardPublicURL)
+	}
+}
+
+func TestVisibleBrowserCanBeEnabled(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("SURF_BROWSER_VISIBLE", "1")
+	if !loadConfig(t).BrowserVisible {
+		t.Fatal("BrowserVisible=false after explicit enable")
+	}
+}
+
+func TestStreamMaxFPSIsBounded(t *testing.T) {
+	for _, test := range []struct {
+		value string
+		want  int
+	}{
+		{"30", 30},
+		{"5", 15},
+		{"90", 60},
+	} {
+		clearConfigEnv(t)
+		t.Setenv("STREAM_MAX_FPS", test.value)
+		if got := loadConfig(t).StreamMaxFPS; got != test.want {
+			t.Errorf("STREAM_MAX_FPS=%q loaded %d, want %d", test.value, got, test.want)
+		}
+	}
+}
+
+func TestSilentAudioSuspensionCanBeEnabled(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("SURF_SUSPEND_SILENT_AUDIO", "1")
+	if !loadConfig(t).SuspendSilentAudio {
+		t.Fatal("SuspendSilentAudio=false after explicit enable")
 	}
 }
 

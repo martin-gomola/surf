@@ -1,0 +1,7 @@
+**
+!VERSION
+!COMPATIBILITY_VERSION
+!backend/**
+!client/core/**
+!protocol/fixtures/**
+!packaging/docker/docker-entrypoint.sh

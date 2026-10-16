@@ -551,7 +551,7 @@ func (b *Controller) noteClientMessage(t string) {
 		}
 		return sum / float64(n)
 	}
-	logs.Info("performance", "Input and media performance sample", map[string]any{
+	sample := map[string]any{
 		"interval_seconds":    dt,
 		"touch_per_second":    float64(counts["touch"]) / dt,
 		"key_per_second":      float64(counts["key"]) / dt,
@@ -566,7 +566,11 @@ func (b *Controller) noteClientMessage(t string) {
 		"encode_mean_ms": mean(encodeSumMS, encodeN), "encode_max_ms": encodeMaxMS,
 		"video_queue_mean_ms": latMeanMS, "video_queue_max_ms": latMaxMS, "video_queue_samples": latN,
 		"audio_latency_mean_ms": aLatMeanMS, "audio_latency_max_ms": aLatMaxMS, "audio_latency_samples": aLatN,
-	})
+	}
+	b.perfMu.Lock()
+	b.lastPerformance = sample
+	b.perfMu.Unlock()
+	logs.Info("performance", "Input and media performance sample", sample)
 }
 
 func (b *Controller) noteCaptureStages(frame media.VideoFrame) {

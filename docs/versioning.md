@@ -92,7 +92,7 @@ A previous release can be built in another worktree.
 
 ```sh
 git worktree add ../surf-v0.15.5 v0.15.5
-make -C ../surf-v0.15.5 native-package
+make -C ../surf-v0.15.5 client
 ```
 
 Rollback replaces the program in place. `SURF_HOME` contains data and must not

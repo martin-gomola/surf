@@ -29,6 +29,16 @@ func (b *Controller) handleAudio(c *transport.Client, on bool) {
 
 func (b *Controller) pumpAudio(c *transport.Client, sub *media.AudioSubscription) {
 	for chunk := range sub.C {
+		if chunk.Suspended {
+			b.send(c, protocol.AudioConfigEvent{Type: "audio-config"})
+			continue
+		}
+		if chunk.Resumed {
+			b.send(c, protocol.AudioConfigEvent{Type: "audio-config", OK: true, Rate: 16000, Channels: 1})
+		}
+		if len(chunk.Data) == 0 {
+			continue
+		}
 		if !chunk.T.IsZero() {
 			b.noteAudioLatency(time.Since(chunk.T))
 		}

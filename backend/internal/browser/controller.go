@@ -86,17 +86,19 @@ type Controller struct {
 
 	downloads *downloadStore
 
-	video       *media.VideoPipeline
-	audio       *media.AudioPipeline
-	capture     *media.Capture
-	mediaMu     sync.Mutex // guards client media subscriptions below
-	lifecycleMu sync.RWMutex
-	inputMu     sync.RWMutex
-	alive       bool
-	suspended   bool
-	shutdown    sync.Once
-	videoSubs   map[*transport.Client]*media.VideoSubscription
-	audioSubs   map[*transport.Client]*media.AudioSubscription
+	video         *media.VideoPipeline
+	audio         *media.AudioPipeline
+	capture       *media.Capture
+	mediaMu       sync.Mutex // guards client media subscriptions below
+	clientStatsMu sync.Mutex
+	clientStats   map[string]clientMediaSnapshot
+	lifecycleMu   sync.RWMutex
+	inputMu       sync.RWMutex
+	alive         bool
+	suspended     bool
+	shutdown      sync.Once
+	videoSubs     map[*transport.Client]*media.VideoSubscription
+	audioSubs     map[*transport.Client]*media.AudioSubscription
 
 	startedAt time.Time
 	governor  streamGovernor
@@ -154,6 +156,7 @@ type Controller struct {
 	encodeTimeN        int
 	encodeTimeSumMS    float64
 	encodeTimeMaxMS    float64
+	lastPerformance    map[string]any
 
 	// verbMu guards the small M2 state: pending JS dialogs and the pending
 	// file-chooser interception (one at a time is plenty for one user).
@@ -175,7 +178,10 @@ func New(cfg *config.Config, hub *transport.Hub) (*Controller, error) {
 	if err != nil {
 		return nil, fmt.Errorf("initialize tab capture: %w", err)
 	}
-	audioCfg := media.AudioConfig{Capture: capture.OpenAudio}
+	audioCfg := media.AudioConfig{
+		Capture:        capture.OpenAudio,
+		SuspendSilence: cfg.SuspendSilentAudio,
+	}
 	videoCfg := videoPipelineConfig(cfg)
 	var b *Controller
 	videoCfg.Start = func(settings media.VideoStartConfig) error {
@@ -204,6 +210,7 @@ func New(cfg *config.Config, hub *transport.Hub) (*Controller, error) {
 		capture:        capture,
 		videoSubs:      map[*transport.Client]*media.VideoSubscription{},
 		audioSubs:      map[*transport.Client]*media.AudioSubscription{},
+		clientStats:    map[string]clientMediaSnapshot{},
 		perfCounts:     map[string]int{},
 		commands:       make(chan controllerCommand, 256),
 		events:         make(chan cdp.Event, 512),
@@ -271,6 +278,7 @@ func (b *Controller) Start() (err error) {
 		W:               b.cfg.ViewW,
 		H:               b.cfg.ViewH,
 		NoSandbox:       b.cfg.ChromeNoSandbox,
+		Visible:         b.cfg.BrowserVisible,
 		ExtensionPaths:  extensionPaths,
 		ContinueSession: b.exactSession,
 	})
@@ -333,8 +341,12 @@ func (b *Controller) Start() (err error) {
 	if err != nil {
 		return err
 	}
-	log.Printf("browser ready, view %dx%d (headless-new, source=tabCapture/WebCodecs, profile %s)",
-		b.viewW, b.viewH, b.cfg.Profile)
+	mode := "headless-new"
+	if b.cfg.BrowserVisible {
+		mode = "headed"
+	}
+	log.Printf("browser ready, view %dx%d (%s, source=tabCapture/WebCodecs, profile %s)",
+		b.viewW, b.viewH, mode, b.cfg.Profile)
 	started = true
 	return nil
 }
@@ -507,6 +519,7 @@ func (b *Controller) Stats() map[string]any {
 		activeURL = t.URL
 	}
 	vw, vh := b.viewW, b.viewH
+	profile := adaptiveProfiles[b.governor.profile]
 	widevine, widevineDetail := b.widevineState, b.widevineDetail
 	b.mu.Unlock()
 	b.mediaMu.Lock()
@@ -521,6 +534,10 @@ func (b *Controller) Stats() map[string]any {
 	latN, latSumMS, latMaxMS := b.perfLatN, b.perfLatSumMS, b.perfLatMaxMS
 	aLatN, aLatSumMS, aLatMaxMS := b.perfALatN, b.perfALatSumMS, b.perfALatMaxMS
 	motionStalls := b.motionStalls
+	lastPerformance := map[string]any{}
+	for key, value := range b.lastPerformance {
+		lastPerformance[key] = value
+	}
 	b.perfMu.Unlock()
 	latMeanMS := 0.0
 	if latN > 0 {
@@ -534,6 +551,7 @@ func (b *Controller) Stats() map[string]any {
 	if !since.IsZero() {
 		windowSec = time.Since(since).Seconds()
 	}
+	_, _, _, _, targetFPS := adaptiveEncoderSettings(profile, b.cfg, vw, vh)
 	stats := map[string]any{
 		"clients": b.hub.ClientCount(), "tabs": tabs, "activeURL": activeURL,
 		"view": fmt.Sprintf("%dx%d", vw, vh), "casting": b.video.Running(),
@@ -543,6 +561,8 @@ func (b *Controller) Stats() map[string]any {
 		"videoLatencyMeanMs": latMeanMS, "videoLatencyMaxMs": latMaxMS, "videoLatencyN": latN,
 		"audioLatencyMeanMs": aLatMeanMS, "audioLatencyMaxMs": aLatMaxMS, "audioLatencyN": aLatN,
 		"motionSourceStalls": motionStalls,
+		"streamProfile":      profile.name, "streamTargetFPS": targetFPS,
+		"clientMedia": b.clientMediaSnapshots(time.Now()), "performance": lastPerformance,
 	}
 	for key, value := range b.hub.Stats() {
 		stats[key] = value

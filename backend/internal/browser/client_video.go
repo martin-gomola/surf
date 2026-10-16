@@ -203,9 +203,11 @@ func (b *Controller) stopVideo(c *transport.Client) {
 func (b *Controller) ClientDisconnected(c *transport.Client) {
 	b.touch.cancelClient(c)
 	b.pointer.cancelClient(c)
+	clientID := governorClientID(c)
 	b.mu.Lock()
-	b.governor.remove(governorClientID(c))
+	b.governor.remove(clientID)
 	b.mu.Unlock()
+	b.removeClientMediaStats(clientID)
 	b.mediaMu.Lock()
 	sub := b.videoSubs[c]
 	delete(b.videoSubs, c)
@@ -225,6 +227,10 @@ func (b *Controller) ClientDisconnected(c *transport.Client) {
 // videoPipelineConfig derives the encoder config from the server config.
 func videoPipelineConfig(cfg *config.Config) media.VideoPipelineConfig {
 	maxW, maxH := 0, 0
+	frameRate := cfg.StreamMaxFPS
+	if frameRate == 0 {
+		frameRate = 60
+	}
 	if s := cfg.StreamScale; s != "" {
 		var sw, sh int
 		if i := strings.IndexByte(s, 'x'); i > 0 {
@@ -243,7 +249,7 @@ func videoPipelineConfig(cfg *config.Config) media.VideoPipelineConfig {
 		ScaleMaxW: maxW, ScaleMaxH: maxH,
 		BitrateK:  cfg.StreamBitrateK,
 		Quantizer: cfg.StreamQuantizer,
-		FrameRate: 60,
+		FrameRate: max(15, min(60, frameRate)),
 	}
 }
 

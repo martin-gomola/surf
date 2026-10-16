@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"testing"
+	"time"
 )
 
 func TestSubscribeFailsImmediatelyWhenCaptureUnset(t *testing.T) {
@@ -16,6 +17,77 @@ func TestSubscribeFailsImmediatelyWhenCaptureUnset(t *testing.T) {
 		}
 	default:
 		t.Fatal("expected sub.C already closed after Subscribe")
+	}
+}
+
+func TestSilentAudioSuspendsAndSignalResumes(t *testing.T) {
+	reader, writer := io.Pipe()
+	s := NewAudioPipeline(AudioConfig{
+		Capture:        func() (io.ReadCloser, error) { return reader, nil },
+		SuspendSilence: true,
+	})
+	defer s.Shutdown()
+	sub := s.Subscribe()
+	defer sub.Close()
+	silence := make([]byte, chunkBytes)
+	for i := 0; i < audioSuspendSilentChunks-1; i++ {
+		if _, err := writer.Write(silence); err != nil {
+			t.Fatal(err)
+		}
+		chunk := <-sub.C
+		if chunk.Suspended || len(chunk.Data) != chunkBytes {
+			t.Fatalf("silence chunk %d = suspended=%t bytes=%d", i, chunk.Suspended, len(chunk.Data))
+		}
+	}
+	if _, err := writer.Write(silence); err != nil {
+		t.Fatal(err)
+	}
+	if chunk := <-sub.C; !chunk.Suspended || len(chunk.Data) != 0 {
+		t.Fatalf("suspension chunk = suspended=%t bytes=%d", chunk.Suspended, len(chunk.Data))
+	}
+	if _, err := writer.Write(silence); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case chunk := <-sub.C:
+		t.Fatalf("suppressed silence produced chunk: %+v", chunk)
+	case <-time.After(20 * time.Millisecond):
+	}
+	signal := bytes.Repeat([]byte{0x34, 0x12}, chunkBytes/2)
+	if _, err := writer.Write(signal); err != nil {
+		t.Fatal(err)
+	}
+	chunk := <-sub.C
+	if !chunk.Resumed || !bytes.Equal(chunk.Data, signal) {
+		t.Fatalf("resume chunk = resumed=%t bytes=%d", chunk.Resumed, len(chunk.Data))
+	}
+}
+
+func TestSubscriberJoiningSuspendedAudioGetsState(t *testing.T) {
+	reader, writer := io.Pipe()
+	s := NewAudioPipeline(AudioConfig{
+		Capture:        func() (io.ReadCloser, error) { return reader, nil },
+		SuspendSilence: true,
+	})
+	defer s.Shutdown()
+	first := s.Subscribe()
+	defer first.Close()
+	silence := make([]byte, chunkBytes)
+	for i := 0; i < audioSuspendSilentChunks; i++ {
+		if _, err := writer.Write(silence); err != nil {
+			t.Fatal(err)
+		}
+		<-first.C
+	}
+	second := s.Subscribe()
+	defer second.Close()
+	select {
+	case chunk := <-second.C:
+		if !chunk.Suspended {
+			t.Fatalf("joining chunk suspended=%t, want true", chunk.Suspended)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("joining subscriber did not receive suspended state")
 	}
 }
 

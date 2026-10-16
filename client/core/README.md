@@ -17,11 +17,10 @@ cmake --build .local/build/client-core
 ctest --test-dir .local/build/client-core --output-on-failure
 ```
 
-The root make targets run the same tests and the sanitizer build.
+The supported root target runs the same tests inside Docker.
 
 ```sh
-make client-core-test
-make client-core-sanitize
+make client-test
 ```
 
 Public headers live under `include/surf`. Media parsers return borrowed views,

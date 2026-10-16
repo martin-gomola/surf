@@ -98,8 +98,14 @@ func main() {
 		err = runLogsCommand(args[1:])
 	case "clipboard":
 		err = runClipboardCommand(args[1:])
+	case "dashboard-url":
+		if len(args) != 1 {
+			err = fmt.Errorf("usage: surf dashboard-url")
+		} else {
+			err = runDashboardURLCommand()
+		}
 	default:
-		fmt.Fprintln(os.Stderr, "Usage: surf [--home PATH] [serve|status|quit|browser|pair|devices|clipboard|logs|doctor|update|version]")
+		fmt.Fprintln(os.Stderr, "Usage: surf [--home PATH] [serve|status|quit|browser|pair|devices|clipboard|logs|dashboard-url|doctor|update|version]")
 		err = fmt.Errorf("unknown command %q", args[0])
 	}
 	if err != nil {
@@ -120,23 +126,53 @@ func runServe(args []string) error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
 	watchDesktopParent(os.Stdin, cancel)
 	ready := make(chan control.Descriptor, 1)
 	done := make(chan error, 1)
 	go func() { done <- app.ServeContext(ctx, ready) }()
-	if pair {
+	var descriptor control.Descriptor
+	if pair || cfg.DashboardAddr != "" {
 		select {
-		case <-ready:
-			go func() {
-				if err := runPairCommandContext(ctx); err != nil && ctx.Err() == nil {
-					log.Printf("surf pair: %v", err)
-				}
-			}()
+		case descriptor = <-ready:
 		case err := <-done:
 			return err
 		}
 	}
-	return <-done
+	var dashboardDone <-chan error
+	if cfg.DashboardAddr != "" {
+		dashboardDone, err = startDockerDashboard(ctx, cfg, descriptor.AdminToken)
+		if err != nil {
+			cancel()
+			<-done
+			return err
+		}
+		log.Printf("Surf Docker dashboard listening on %s", cfg.DashboardAddr)
+	}
+	if pair {
+		go func() {
+			if err := runPairCommandContext(ctx); err != nil && ctx.Err() == nil {
+				log.Printf("surf pair: %v", err)
+			}
+		}()
+	}
+	if dashboardDone == nil {
+		return <-done
+	}
+	select {
+	case err := <-done:
+		return err
+	case err := <-dashboardDone:
+		if err == nil && ctx.Err() != nil {
+			return <-done
+		}
+		cancel()
+		<-done
+		return err
+	}
 }
 
 func watchDesktopParent(parent io.Reader, cancel context.CancelFunc) {

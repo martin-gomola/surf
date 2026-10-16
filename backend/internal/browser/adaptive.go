@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"sort"
 	"time"
 
 	"surf-backend/internal/config"
@@ -65,6 +66,27 @@ type governorDecision struct {
 	from, to int
 	reason   string
 	pressure float64
+}
+
+type clientMediaSnapshot struct {
+	Device        string  `json:"device"`
+	UpdatedAt     string  `json:"updatedAt"`
+	AgeSeconds    float64 `json:"ageSeconds"`
+	Profile       string  `json:"profile"`
+	Decision      string  `json:"decision"`
+	Reason        string  `json:"reason"`
+	TargetFPS     int     `json:"targetFps"`
+	ImageFPS      float64 `json:"imageFps"`
+	AURate        float64 `json:"auRate"`
+	DecodeFPS     float64 `json:"decodeFps"`
+	PresentedFPS  float64 `json:"presentedFps"`
+	DropPercent   float64 `json:"dropPercent"`
+	QueueDepth    int     `json:"queueDepth"`
+	GapMS         float64 `json:"gapMs"`
+	CallbackMS    float64 `json:"callbackMs"`
+	Pressure      float64 `json:"pressure"`
+	DecodeErrors  int     `json:"decodeErrors"`
+	MemoryWarning bool    `json:"memoryWarning"`
 }
 
 func newStreamGovernor() streamGovernor {
@@ -243,7 +265,7 @@ func governorPressure(stats protocol.MediaStatsCommand, profile adaptiveProfile)
 		return 0, false, false, "static page"
 	}
 	frameBudget := 1000.0 / float64(profile.frameRate)
-	pressure, reason := 0.0, "decoder pressure"
+	pressure, reason := 0.0, "healthy"
 	consider := func(value float64, label string) {
 		if value > pressure {
 			pressure, reason = value, label
@@ -309,7 +331,16 @@ func adaptiveEncoderSettings(profile adaptiveProfile, cfg *config.Config, w, h i
 		bitrateK = 1000
 	}
 	quantizer = max(0, min(51, cfg.StreamQuantizer+profile.quantizerDelta))
-	return maxW, maxH, bitrateK, quantizer, profile.frameRate
+	maxFPS := cfg.StreamMaxFPS
+	if maxFPS == 0 {
+		maxFPS = 60
+	}
+	maxFPS = max(15, min(60, maxFPS))
+	// Scale the whole governor ladder with the configured ceiling. A simple
+	// min would collapse 60/50/40/30 into 30/30/30/30 for a legacy-device cap,
+	// causing expensive encoder restarts without reducing decoder cadence.
+	frameRate = max(15, profile.frameRate*maxFPS/60)
+	return maxW, maxH, bitrateK, quantizer, frameRate
 }
 
 func governorClientID(c *transport.Client) string {
@@ -320,18 +351,78 @@ func governorClientID(c *transport.Client) string {
 }
 
 func (b *Controller) handleMediaStats(c *transport.Client, stats *protocol.MediaStatsCommand) {
-	if !b.cfg.AdaptiveVideo {
-		return
-	}
 	now := time.Now()
-	b.mu.Lock()
-	decision := b.governor.observe(governorClientID(c), now, *stats)
-	profile := adaptiveProfiles[b.governor.profile]
-	b.mu.Unlock()
+	clientID := governorClientID(c)
+	profileIndex := b.profileIndex()
+	profile := adaptiveProfiles[profileIndex]
+	pressure, active, severe, reason := governorPressure(*stats, profile)
+	decisionLabel := "disabled"
+	var decision governorDecision
+	if b.cfg.AdaptiveVideo {
+		b.mu.Lock()
+		decision = b.governor.observe(clientID, now, *stats)
+		profile = adaptiveProfiles[b.governor.profile]
+		b.mu.Unlock()
+		decisionLabel = "hold"
+		if decision.changed {
+			decisionLabel = adaptiveProfiles[decision.from].name + "->" + adaptiveProfiles[decision.to].name
+		}
+	}
+	log.Printf("video: client stats device=%s profile=%s image=%.1f au=%.1f decode=%.1f presented=%.1f renderer=%s renderer-fps=%.1f drops=%.1f queue=%d gap=%.1fms pressure=%.2f active=%t severe=%t reason=%s decision=%s",
+		shortGovernorClientID(clientID), profile.name, stats.ImageFPS, stats.AURate,
+		stats.DecodeFPS, stats.PresentedFPS, stats.Renderer, stats.RendererFPS,
+		stats.DropPercent, stats.QueueDepth, stats.GapMS, pressure, active, severe,
+		reason, decisionLabel)
+	b.recordClientMediaStats(clientID, now, *stats, profile, decisionLabel, reason, pressure)
 	if !decision.changed {
 		return
 	}
 	go b.applyAdaptiveProfile(decision, profile)
+}
+
+func (b *Controller) recordClientMediaStats(clientID string, now time.Time, stats protocol.MediaStatsCommand, profile adaptiveProfile, decision, reason string, pressure float64) {
+	_, _, _, _, targetFPS := adaptiveEncoderSettings(profile, b.cfg, 0, 0)
+	snapshot := clientMediaSnapshot{
+		Device: shortGovernorClientID(clientID), UpdatedAt: now.UTC().Format(time.RFC3339Nano),
+		Profile: profile.name, Decision: decision, Reason: reason, TargetFPS: targetFPS,
+		ImageFPS: stats.ImageFPS, AURate: stats.AURate, DecodeFPS: stats.DecodeFPS,
+		PresentedFPS: stats.PresentedFPS, DropPercent: stats.DropPercent,
+		QueueDepth: stats.QueueDepth, GapMS: stats.GapMS, CallbackMS: stats.CallbackMS,
+		Pressure: pressure, DecodeErrors: stats.DecodeErrors, MemoryWarning: stats.MemoryWarn,
+	}
+	b.clientStatsMu.Lock()
+	if b.clientStats == nil {
+		b.clientStats = map[string]clientMediaSnapshot{}
+	}
+	b.clientStats[clientID] = snapshot
+	b.clientStatsMu.Unlock()
+}
+
+func (b *Controller) clientMediaSnapshots(now time.Time) []clientMediaSnapshot {
+	b.clientStatsMu.Lock()
+	result := make([]clientMediaSnapshot, 0, len(b.clientStats))
+	for _, snapshot := range b.clientStats {
+		if updated, err := time.Parse(time.RFC3339Nano, snapshot.UpdatedAt); err == nil {
+			snapshot.AgeSeconds = math.Max(0, now.Sub(updated).Seconds())
+		}
+		result = append(result, snapshot)
+	}
+	b.clientStatsMu.Unlock()
+	sort.Slice(result, func(i, j int) bool { return result[i].Device < result[j].Device })
+	return result
+}
+
+func (b *Controller) removeClientMediaStats(clientID string) {
+	b.clientStatsMu.Lock()
+	delete(b.clientStats, clientID)
+	b.clientStatsMu.Unlock()
+}
+
+func shortGovernorClientID(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
 }
 
 func (b *Controller) applyAdaptiveProfile(decision governorDecision, profile adaptiveProfile) {

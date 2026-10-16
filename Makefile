@@ -1,133 +1,64 @@
-.PHONY: test client-core-build client-core-test client-core-sanitize desktop-build desktop-test desktop-run desktop-package surf-binary surf-dist surf-release-dist native-sdk native-package
+.PHONY: test backend-test client client-ready client-test client-core-test native-sdk native-buildenv native-package up down links dashboard benchmark
 
-VERSION := $(shell tr -d '[:space:]' < VERSION)
-COMPATIBILITY_VERSION := $(shell tr -d '[:space:]' < COMPATIBILITY_VERSION)
-SURF_GOOS ?= $(shell go env GOOS)
-SURF_GOARCH ?= $(shell go env GOARCH)
-# Local rebuilds retain client updating whenever a package for the exact Surf
-# version exists. Release builds may still select an explicit verified package.
-CLIENT_DEB ?= $(shell ls -1t client/ios/packages/space.seg6.surf_$(VERSION)-*_iphoneos-arm.deb 2>/dev/null | sed -n '1p')
-MAKENSIS ?= makensis
-SURF_DIST := surf-$(VERSION)-$(SURF_GOOS)-$(SURF_GOARCH)
-SURF_CGO_ENV := CGO_ENABLED=0
-CLIENT_CORE_BUILD_DIR ?= .local/build/client-core
-CLIENT_CORE_SANITIZE_DIR ?= .local/build/client-core-sanitize
-ifeq ($(SURF_GOOS),windows)
-SURF_EXE := surf.exe
-SURF_ARCHIVE := $(SURF_DIST).zip
-else
-SURF_EXE := surf
-SURF_ARCHIVE := $(SURF_DIST).tar.gz
-endif
+DOCKERFILE := packaging/docker/Dockerfile
 
-test: client-core-test
-	cd backend && go test ./...
-	$(MAKE) desktop-test
+test: backend-test client-core-test
 
-client-core-build:
-	cmake -S client/core -B "$(CLIENT_CORE_BUILD_DIR)" \
-		-DCMAKE_BUILD_TYPE=Debug -DSURF_CORE_WARNINGS_AS_ERRORS=ON
-	cmake --build "$(CLIENT_CORE_BUILD_DIR)"
+backend-test:
+	docker build --platform linux/amd64 --target backend-test -f "$(DOCKERFILE)" .
 
-client-core-test: client-core-build
-	ctest --test-dir "$(CLIENT_CORE_BUILD_DIR)" --output-on-failure
+client-core-test:
+	docker build --target client-core-test -f "$(DOCKERFILE)" .
 
-client-core-sanitize:
-	cmake -S client/core -B "$(CLIENT_CORE_SANITIZE_DIR)" \
-		-DCMAKE_BUILD_TYPE=Debug -DSURF_CORE_WARNINGS_AS_ERRORS=ON \
-		-DSURF_CORE_SANITIZE=ON
-	cmake --build "$(CLIENT_CORE_SANITIZE_DIR)"
-	ctest --test-dir "$(CLIENT_CORE_SANITIZE_DIR)" --output-on-failure
-
-desktop-build:
-	CARGO_TARGET_DIR="$(CURDIR)/.local/build/desktop" \
-		cargo build --manifest-path client/desktop/Cargo.toml --workspace
-
-desktop-test:
-	CARGO_TARGET_DIR="$(CURDIR)/.local/build/desktop" \
-		cargo test --manifest-path client/desktop/Cargo.toml --workspace
-
-desktop-run:
-	CARGO_TARGET_DIR="$(CURDIR)/.local/build/desktop" \
-		cargo run --manifest-path client/desktop/Cargo.toml -p surf-client
-
-desktop-package:
-	client/desktop/package-linux.sh
-
-# Surf's tray implementation binds native desktop APIs without cgo, so every
-# supported target cross-compiles from the same Go toolchain.
-surf-binary:
-	if [ -n "$(CLIENT_DEB)" ]; then \
-		test -f "$(CLIENT_DEB)"; \
-		cp "$(CLIENT_DEB)" backend/internal/web/client/client.deb; \
-		cd backend && go run ./tools/clientbundlemeta \
-			--deb "../$(CLIENT_DEB)" --version "$(VERSION)" \
-			--compatibility "$(COMPATIBILITY_VERSION)" \
-			--output internal/web/client/client.json; \
-	fi
-	if [ "$(SURF_GOOS)" = "windows" ]; then \
-		cd backend/cmd/surf && go run github.com/tc-hib/go-winres@v0.3.1 simply \
-			--arch "$(SURF_GOARCH)" --out rsrc --manifest gui --icon surf-icon.png \
-			--product-version "$(VERSION).0" --file-version "$(VERSION).0" \
-			--file-description "Surf remote browser backend" --product-name Surf \
-			--original-filename surf.exe; \
-	fi
-	cd backend && $(SURF_CGO_ENV) GOOS=$(SURF_GOOS) GOARCH=$(SURF_GOARCH) go build -trimpath \
-		$(if $(CLIENT_DEB),-tags=client_bundle) \
-		-ldflags="-s -w $(if $(filter windows,$(SURF_GOOS)),-H=windowsgui) -X surf-backend/internal/config.AppVersion=$(VERSION) -X surf-backend/internal/config.CompatibilityVersion=$(COMPATIBILITY_VERSION)" \
-		-o "$(SURF_EXE)" ./cmd/surf
-
-surf-dist: surf-binary
-	rm -rf "dist/$(SURF_DIST)" "dist/Surf.app"
-	if [ "$(SURF_GOOS)" = "darwin" ]; then \
-		mkdir -p "dist/Surf.app/Contents/MacOS"; \
-		cp "backend/$(SURF_EXE)" "dist/Surf.app/Contents/MacOS/surf"; \
-		mkdir -p "dist/Surf.app/Contents/Resources"; \
-		cp CHANGELOG.md "dist/Surf.app/Contents/Resources/CHANGELOG.md"; \
-		(cd backend && go run ./tools/icns cmd/surf/surf-icon.png ../dist/Surf.app/Contents/Resources/Surf.icns); \
-		sed "s/@VERSION@/$(VERSION)/g" packaging/desktop/Info.plist > "dist/Surf.app/Contents/Info.plist"; \
-		tar -C dist -czf "dist/$(SURF_ARCHIVE)" "Surf.app"; \
-	else \
-		mkdir -p "dist/$(SURF_DIST)"; \
-		cp "backend/$(SURF_EXE)" "dist/$(SURF_DIST)/$(SURF_EXE)"; \
-		cp packaging/desktop/README.md "dist/$(SURF_DIST)/README.md"; \
-		cp CHANGELOG.md "dist/$(SURF_DIST)/CHANGELOG.md"; \
-		if [ "$(SURF_GOOS)" = "linux" ]; then cp packaging/backend/surf.service "dist/$(SURF_DIST)/surf.service"; fi; \
-		if [ "$(SURF_GOOS)" = "windows" ]; then \
-			rm -f "dist/$(SURF_ARCHIVE)"; \
-			(cd backend && go run ./tools/zipdir "../dist/$(SURF_DIST)" "../dist/$(SURF_ARCHIVE)"); \
-			if command -v "$(MAKENSIS)" >/dev/null 2>&1; then \
-				sed -e "s|@VERSION@|$(VERSION)|g" -e "s|@SOURCE@|$(CURDIR)/dist/$(SURF_DIST)|g" \
-					-e "s|@OUTPUT_DIR@|$(CURDIR)/dist|g" packaging/windows/surf.nsi.in > dist/surf.nsi; \
-				"$(MAKENSIS)" -V2 dist/surf.nsi; \
-				rm dist/surf.nsi; \
-			fi; \
-		else \
-			tar -C dist -czf "dist/$(SURF_ARCHIVE)" "$(SURF_DIST)"; \
-			if [ "$(SURF_GOARCH)" = "amd64" ] && [ -n "$${APPIMAGETOOL:-}" ]; then \
-				rm -rf dist/Surf.AppDir; \
-				mkdir -p dist/Surf.AppDir/usr/bin dist/Surf.AppDir/usr/share/doc/surf; \
-				cp backend/surf dist/Surf.AppDir/usr/bin/surf; \
-				cp CHANGELOG.md dist/Surf.AppDir/usr/share/doc/surf/CHANGELOG.md; \
-				cp packaging/desktop/surf.desktop dist/Surf.AppDir/surf.desktop; \
-				cp backend/cmd/surf/surf-icon.png dist/Surf.AppDir/surf.png; \
-				ln -s usr/bin/surf dist/Surf.AppDir/AppRun; \
-				ARCH=x86_64 "$$APPIMAGETOOL" --appimage-extract-and-run dist/Surf.AppDir "dist/surf-$(VERSION)-linux-amd64.AppImage"; \
-			fi; \
-		fi; \
-	fi
-
-surf-release-dist:
-	test -n "$(CLIENT_DEB)"
-	$(MAKE) surf-dist SURF_GOOS=linux SURF_GOARCH=amd64 CLIENT_DEB="$(CLIENT_DEB)"
-	$(MAKE) surf-dist SURF_GOOS=linux SURF_GOARCH=arm64 CLIENT_DEB="$(CLIENT_DEB)"
-	$(MAKE) surf-dist SURF_GOOS=windows SURF_GOARCH=amd64 CLIENT_DEB="$(CLIENT_DEB)"
-	$(MAKE) surf-dist SURF_GOOS=darwin SURF_GOARCH=amd64 CLIENT_DEB="$(CLIENT_DEB)"
-	$(MAKE) surf-dist SURF_GOOS=darwin SURF_GOARCH=arm64 CLIENT_DEB="$(CLIENT_DEB)"
+client-test: client-core-test
 
 native-sdk:
 	native/buildenv/fetch-sdk.sh
 
-native-package: native-sdk
-	docker run --rm --network host -v "$(CURDIR):/src" surf-buildenv bash -c \
+native-buildenv:
+	docker build -t surf-buildenv native/buildenv
+
+client: native-sdk native-buildenv
+	docker run --rm -v "$(CURDIR):/src" surf-buildenv bash -c \
 		'make -C /src/client/ios clean package DEBUG=0 && bash /src/client/ios/verify-package.sh'
+	@package="$$(tr -d '\r\n' < client/ios/.theos/last_package)"; \
+	case "$$package" in /*) ;; *) package="$(CURDIR)/client/ios/$${package#./}" ;; esac; \
+	test -f "$$package"; \
+	cp "$$package" backend/internal/web/client/client.deb; \
+	printf 'Staged custom client: %s\n' "$$package"
+
+native-package: client
+
+client-ready:
+	@test -f backend/internal/web/client/client.deb || { \
+		echo "Custom iOS client is not staged; run 'make client' first." >&2; exit 1; \
+	}
+
+up: client-ready
+	cd "$(CURDIR)/packaging/docker" && docker compose up -d --build
+	@$(MAKE) --no-print-directory links
+
+down:
+	cd "$(CURDIR)/packaging/docker" && docker compose down
+
+links:
+	@cd "$(CURDIR)/packaging/docker" && \
+		admin=""; attempts=0; \
+		while [ -z "$$admin" ] && [ $$attempts -lt 40 ]; do \
+			admin="$$(docker compose exec -T surf surf dashboard-url 2>/dev/null)" || true; \
+			attempts=$$((attempts + 1)); \
+			[ -n "$$admin" ] || sleep 0.25; \
+		done; \
+		[ -n "$$admin" ] || { echo "Surf started, but dashboard link is not ready." >&2; exit 1; }; \
+		server="$$(docker compose exec -T surf sh -c 'case "$$SURF_PUBLIC_ADDRESS" in http://*|https://*) printf "%s" "$$SURF_PUBLIC_ADDRESS" ;; "") printf "https://127.0.0.1:%s" "$$PORT" ;; *) printf "https://%s" "$$SURF_PUBLIC_ADDRESS" ;; esac')"; \
+		printf '\nSurf:  %s\nAdmin: %s\n\n' "$$server" "$$admin"
+
+dashboard:
+	@url="$$(cd "$(CURDIR)/packaging/docker" && docker compose exec -T surf surf dashboard-url)"; \
+	if command -v open >/dev/null 2>&1; then open "$$url"; \
+	elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$$url"; \
+	elif command -v cmd.exe >/dev/null 2>&1; then cmd.exe /c start "" "$$url"; \
+	else printf '%s\n' "$$url"; fi
+
+benchmark:
+	packaging/docker/benchmark.sh

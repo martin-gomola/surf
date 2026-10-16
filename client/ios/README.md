@@ -12,7 +12,7 @@ formats and shared browser, connection, input, and media state.
 Build and verify the package from the repository root.
 
 ```sh
-make native-package
+make client
 ```
 
 Packages are written to `client/ios/packages/`. The build generates
